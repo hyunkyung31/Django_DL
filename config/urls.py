@@ -1,6 +1,13 @@
 from django.contrib import admin
 from django.urls import path
-from api.views import health_check, me, login, patient_list, patient_detail
+from api.views import (
+    health_check,
+    me,
+    login,
+    patient_list,
+    patient_detail,
+    patient_search,
+)
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
     TokenRefreshView,
@@ -18,6 +25,7 @@ urlpatterns = [
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/", me),
     path("api/patients/", patient_list),
+    path("api/patients/search/", patient_search),
     path("api/patients/<str:patient_id>/", patient_detail),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
