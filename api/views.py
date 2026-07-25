@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema
+from django.db.models import Q
 
 from api.models import Doctor, Patient, Examination, AIResult
 from api.serializers import (
@@ -104,4 +105,32 @@ def patient_detail(request, patient_id):
         "patient": PatientSerializer(patient).data,
         "examinations": ExaminationSerializer(exams, many=True).data,
         "ai_results": AIResultSerializer(ai_results, many=True).data,
+    })
+
+@extend_schema(
+    responses={200: PatientListResponseSerializer},
+    tags=["patients"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def patient_search(request):
+    """전체 환자에서 ID/이름 검색 (담당 제한 없음)"""
+    q = (request.query_params.get("q") or "").strip()
+
+    if not q:
+        return Response(
+            {"detail": "검색어 q를 입력해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    patients = Patient.objects.filter(
+        Q(patient_id__icontains=q) | Q(patient_name__icontains=q)
+    ).order_by("patient_id")[:50]
+
+    results = PatientSerializer(patients, many=True).data
+    return Response({
+        "doctor_id": request.user.username,
+        "count": len(results),
+        "results": results,
+        "query": q,
     })
