@@ -2,6 +2,7 @@ from io import BytesIO
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 from services.inception_service import predict
+from  services.gradcam_service import generate_gradcam
 
 router = APIRouter(
     prefix = "/inception",
@@ -9,7 +10,8 @@ router = APIRouter(
 )
 
 ALLOWED_CONTENT_TYPES = {"image/png",
-                         "image/jpg"}
+                         "image/jpg",
+                         "image/jpeg",}
 
 @router.post("/predict")
 async def predict_inception(
@@ -45,3 +47,32 @@ async def predict_inception(
         **result,
     }
 
+@router.post("/gradcam")
+async def predict_inception_gradcam(
+    file: UploadFile = File(...),
+):
+    if file.content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code = 400,
+            deatil = ("지원하지 않는 파일 형식입니다."
+                      "PNG, JPG,JPEG"
+        ),
+     )
+    try:
+        file_bytes = await file.read()
+        
+        with Image.open(BytesIO(file_bytes)) as image:
+            result = generate_gradcam(image = image,
+                                      target_class = None,
+                                      alpha = 0.45,)
+    except UnidentifiedImageError:
+        raise HTTPException(status_code = 400,
+                            detail = "올바른 이미지 파일이 아닙니다.")
+    except Exception as error:
+        raise HTTPException(status_code = 500,
+                            detail = f"InceptionV3 Grad-CAM 처리 중 오류가 발생했습니다: {error}",)
+    return {
+        "filename": file.filename,
+        **result,
+    }
+            
