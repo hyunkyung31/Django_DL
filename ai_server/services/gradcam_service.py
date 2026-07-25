@@ -182,7 +182,7 @@ def generate_gradcam(
             "probabilities": result["probabilities"],
             "show_gradcam": show_gradcam,
             "heatmap_base64": heatmap_base64,
-            "overlay_base64": heatmap_base64,
+            "overlay_base64": overlay_base64,
 
         }
     finally:
