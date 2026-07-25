@@ -44,3 +44,32 @@ class Patient(models.Model):
 
     def __str__(self):
         return f"{self.patient_id} ({self.patient_name})"
+
+class Examination(models.Model):
+    exam_id = models.IntegerField(primary_key=True)
+    patient_id = models.CharField(max_length=50)
+    vessel_type = models.CharField(max_length=20)
+    video_path = models.CharField(max_length=255)
+    key_frame_path = models.CharField(max_length=255)
+    class Meta:
+        db_table = "examinations"
+        managed = False
+    def __str__(self):
+        return f"{self.exam_id} ({self.patient_id})"
+class AIResult(models.Model):
+    exam_id = models.IntegerField(primary_key=True)
+    confirming_doctor_id = models.CharField(max_length=50, null=True, blank=True)
+    has_lesion = models.BooleanField()
+    severity_class = models.CharField(max_length=50)
+    confidence_score = models.FloatField()
+    ai_bbox_data = models.JSONField(null=True, blank=True)
+    gradcam_path = models.CharField(max_length=255, null=True, blank=True)
+    heart_score = models.IntegerField(null=True, blank=True)
+    mace_risk_percent = models.FloatField(null=True, blank=True)
+    doctor_opinion = models.TextField(null=True, blank=True)
+    is_confirmed = models.BooleanField(default=False)
+    class Meta:
+        db_table = "ai_results"
+        managed = False
+    def __str__(self):
+        return f"AIResult({self.exam_id})"

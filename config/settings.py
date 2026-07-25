@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "api",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -110,8 +111,14 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+    "DEFAULT_SCHEMA_CLASS" : "drf_spectacular.openapi.AutoSchema",
 }
 
+SPECTACULAR_SETTINGS = {
+    "TITLE": "ANGIO CDSS API",
+    "DESCRIPTION": "혈관조영술 AI 진단 시스템 백엔드 API",
+    "VERSION": "1.0.0",
+}
 
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
