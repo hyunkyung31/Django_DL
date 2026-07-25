@@ -7,6 +7,8 @@ from api.views import (
     patient_list,
     patient_detail,
     patient_search,
+    ai_predict,
+    ai_gradcam,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -33,4 +35,6 @@ urlpatterns = [
         SpectacularSwaggerView.as_view(url_name="schema"),
         name="swagger-ui",
     ),
+    path("api/ai/predict/", ai_predict),
+    path("api/ai/gradcam/", ai_gradcam),
 ]

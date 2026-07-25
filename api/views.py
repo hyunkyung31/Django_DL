@@ -1,3 +1,6 @@
+import requests 
+from django.conf import settings
+
 from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -17,8 +20,6 @@ from api.serializers import (
     AIResultSerializer,
     PatientDetailSerializer,
 )
-
-
 
 @api_view(['GET'])
 def health_check(request) :
@@ -134,3 +135,54 @@ def patient_search(request):
         "results": results,
         "query": q,
     })
+
+def _forward_to_ai(endpoint: str, uploaded_file):
+    """AI 서버로 이미지 파일 전달"""
+    url = f"{settings.AI_SERVER_URL.rstrip('/')}{endpoint}"
+    files = {
+        "file": (
+            uploaded_file.name,
+            uploaded_file.read(),
+            uploaded_file.content_type or "application/octet-stream",
+        )
+    }
+    try:
+        ai_response = requests.post(url, files=files, timeout=120)
+    except requests.RequestException as exc:
+        return Response(
+            {"detail": f"AI 서버 연결 실패: {exc}"},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    try:
+        data = ai_response.json()
+    except ValueError:
+        data = {"detail": ai_response.text}
+
+    return Response(data, status=ai_response.status_code)
+
+
+@extend_schema(tags=["ai"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def ai_predict(request):
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response(
+            {"detail": "file 필드에 이미지를 업로드해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return _forward_to_ai("/inception/predict", uploaded)
+
+
+@extend_schema(tags=["ai"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def ai_gradcam(request):
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response(
+            {"detail": "file 필드에 이미지를 업로드해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return _forward_to_ai("/inception/gradcam", uploaded)

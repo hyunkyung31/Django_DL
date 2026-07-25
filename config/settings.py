@@ -136,3 +136,5 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = "static/"
+
+AI_SERVER_URL = os.environ.get("AI_SERVER_URL", "http://127.0.0.1:8001")
