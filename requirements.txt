@@ -18,3 +18,5 @@ drf-spectacular==0.30.0
 # ==========================================
 gunicorn==26.0.0
 whitenoise==6.12.0
+
+requests==2.32.4
