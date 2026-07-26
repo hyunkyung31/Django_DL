@@ -14,6 +14,7 @@ from api.models import Doctor, Patient, Examination, AIResult
 from api.serializers import (
     LoginSerializer,
     LoginResponseSerializer,
+    DoctorSerializer,
     PatientSerializer,
     PatientListResponseSerializer,
     ExaminationSerializer,
@@ -63,6 +64,17 @@ def me(request):
         "username": user.username,
         "email": user.email,
     })
+
+@extend_schema(
+    responses={200: DoctorSerializer(many=True)},
+    tags=["doctors"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def doctor_list(request):
+    doctors = Doctor.objects.all().order_by("doctor_id")
+    return Response(DoctorSerializer(doctors, many=True).data)
+
 
 @extend_schema(
     responses={200: PatientListResponseSerializer},
