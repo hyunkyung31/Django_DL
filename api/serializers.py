@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from api.models import Patient, Examination, AIResult
+from api.models import Doctor, Patient, Examination, AIResult
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -10,6 +10,17 @@ class LoginResponseSerializer(serializers.Serializer):
     refresh = serializers.CharField()
     doctor_id = serializers.CharField()
     doctor_name = serializers.CharField()
+
+class DoctorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Doctor
+        fields = [
+            "doctor_id",
+            "doctor_name",
+            "department",
+            "hospital_name",
+        ]
+
 
 class PatientSerializer(serializers.ModelSerializer):
     class Meta:
