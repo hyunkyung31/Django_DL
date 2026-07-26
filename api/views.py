@@ -10,10 +10,15 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema
 from django.db.models import Q
 
+from django.db.models import Max
+from django.http import FileResponse
+
 from api.models import Doctor, Patient, Examination, AIResult
+from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
 from api.serializers import (
     LoginSerializer,
     LoginResponseSerializer,
+    DoctorSerializer,
     PatientSerializer,
     PatientListResponseSerializer,
     ExaminationSerializer,
@@ -65,6 +70,17 @@ def me(request):
     })
 
 @extend_schema(
+    responses={200: DoctorSerializer(many=True)},
+    tags=["doctors"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def doctor_list(request):
+    doctors = Doctor.objects.all().order_by("doctor_id")
+    return Response(DoctorSerializer(doctors, many=True).data)
+
+
+@extend_schema(
     responses={200: PatientListResponseSerializer},
     tags=["patients"],
 )
@@ -104,8 +120,12 @@ def patient_detail(request, patient_id):
     ai_results = AIResult.objects.filter(exam_id__in=exam_ids)
     return Response({
         "patient": PatientSerializer(patient).data,
-        "examinations": ExaminationSerializer(exams, many=True).data,
-        "ai_results": AIResultSerializer(ai_results, many=True).data,
+        "examinations": ExaminationSerializer(
+            exams, many=True, context={"request": request}
+        ).data,
+        "ai_results": AIResultSerializer(
+            ai_results, many=True, context={"request": request}
+        ).data,
     })
 
 @extend_schema(
@@ -186,3 +206,94 @@ def ai_gradcam(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     return _forward_to_ai("/inception/gradcam", uploaded)
+
+
+@extend_schema(tags=["media"])
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def media_local(request):
+    """로컬 MEDIA_ROOT 파일을 JWT 인증 후 스트리밍."""
+    relative = (request.query_params.get("path") or "").strip()
+    full = resolve_local_media_path(relative)
+    if full is None:
+        return Response({"detail": "파일을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    return FileResponse(open(full, "rb"), as_attachment=False)
+
+
+@extend_schema(tags=["media"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def patient_media_upload(request, patient_id):
+    """
+    환자 미디어 업로드.
+    form-data:
+      - file: 이미지/영상
+      - media_type: key_frame | video | gradcam  (기본 key_frame)
+    """
+    patient = Patient.objects.filter(patient_id=patient_id).first()
+    if patient is None:
+        return Response({"detail": "환자를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response(
+            {"detail": "file 필드에 파일을 업로드해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    media_type = (request.data.get("media_type") or "key_frame").strip()
+    if media_type not in ("key_frame", "video", "gradcam"):
+        return Response(
+            {"detail": "media_type은 key_frame, video, gradcam 중 하나여야 합니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    stored_path = save_media_file(patient_id, media_type, uploaded)
+
+    exam = (
+        Examination.objects.filter(patient_id=patient_id)
+        .order_by("exam_id")
+        .first()
+    )
+    if exam is None:
+        next_id = (Examination.objects.aggregate(m=Max("exam_id")).get("m") or 0) + 1
+        exam = Examination(
+            exam_id=next_id,
+            patient_id=patient_id,
+            vessel_type="UNKNOWN",
+            video_path="",
+            key_frame_path="",
+        )
+
+    if media_type == "key_frame":
+        exam.key_frame_path = stored_path
+    elif media_type == "video":
+        exam.video_path = stored_path
+    exam.save()
+
+    if media_type == "gradcam":
+        ai = AIResult.objects.filter(exam_id=exam.exam_id).first()
+        if ai is None:
+            ai = AIResult(
+                exam_id=exam.exam_id,
+                has_lesion=False,
+                severity_class="unknown",
+                confidence_score=0.0,
+                is_confirmed=False,
+            )
+        ai.gradcam_path = stored_path
+        ai.save()
+
+    return Response(
+        {
+            "patient_id": patient_id,
+            "exam_id": exam.exam_id,
+            "media_type": media_type,
+            "stored_path": stored_path,
+            "url": build_media_url(request, stored_path),
+            "examination": ExaminationSerializer(
+                exam, context={"request": request}
+            ).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )

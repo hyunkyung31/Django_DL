@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -114,6 +115,11 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS" : "drf_spectacular.openapi.AutoSchema",
 }
 
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=12),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+}
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "ANGIO CDSS API",
     "DESCRIPTION": "혈관조영술 AI 진단 시스템 백엔드 API",
@@ -137,4 +143,11 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 AI_SERVER_URL = os.environ.get("AI_SERVER_URL", "http://127.0.0.1:8001")
+
+# 비우면 로컬 MEDIA_ROOT 사용. 예: angio-cdss-media
+GCS_MEDIA_BUCKET = os.environ.get("GCS_MEDIA_BUCKET", "").strip()
+GCS_PROJECT = os.environ.get("GCS_PROJECT", "").strip()
