@@ -54,7 +54,7 @@ async def predict_inception_gradcam(
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code = 400,
-            deatil = ("지원하지 않는 파일 형식입니다."
+            detail = ("지원하지 않는 파일 형식입니다."
                       "PNG, JPG,JPEG"
         ),
      )
