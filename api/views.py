@@ -26,6 +26,10 @@ from api.serializers import (
     PatientDetailSerializer,
 )
 
+from django.http import FileResponse, Http404
+from google.cloud import storage
+import io
+
 @api_view(['GET'])
 def health_check(request) :
     return Response({"status" : "ok", "message" : "ANGIO CDSS 백엔드 서버가 정상 작동 중입니다."})
@@ -297,3 +301,22 @@ def patient_media_upload(request, patient_id):
         },
         status=status.HTTP_201_CREATED,
     )
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def media_gcs(request):
+    gs_uri = (request.query_params.get("path") or "").strip()
+    if not gs_uri.startswith("gs://"):
+        return Response({"detail": "invalid path"}, status=400)
+    without = gs_uri[5:]
+    bucket_name, _, blob_name = without.partition("/")
+    if not bucket_name or not blob_name:
+        return Response({"detail": "invalid gs uri"}, status=400)
+    try:
+        client = storage.Client(project=getattr(settings, "GCS_PROJECT", None) or None)
+        blob = client.bucket(bucket_name).blob(blob_name)
+        data = blob.download_as_bytes()
+    except Exception:
+        raise Http404("file not found")
+    content_type = blob.content_type or "application/octet-stream"
+    return FileResponse(io.BytesIO(data), content_type=content_type)

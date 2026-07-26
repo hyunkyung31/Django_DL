@@ -11,6 +11,7 @@ from api.views import (
     ai_predict,
     ai_gradcam,
     media_local,
+    media_gcs,
     patient_media_upload,
 )
 from rest_framework_simplejwt.views import(
@@ -43,4 +44,5 @@ urlpatterns = [
     ),
     path("api/ai/predict/", ai_predict),
     path("api/ai/gradcam/", ai_gradcam),
+    path("api/media/gcs/", media_gcs),
 ]

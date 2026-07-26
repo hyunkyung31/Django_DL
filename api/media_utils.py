@@ -50,7 +50,7 @@ def build_media_url(request, stored_path: Optional[str]) -> Optional[str]:
         return path
 
     if path.startswith("gs://"):
-        return _signed_gcs_url(path)
+        return request.build_absolute_uri(f"/api/media/gcs/?path={quote(path)}")
 
     # 로컬 media 상대경로 → 인증된 프록시 URL
     return request.build_absolute_uri(f"/api/media/local/?path={quote(path)}")
