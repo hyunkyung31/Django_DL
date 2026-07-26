@@ -4,6 +4,7 @@ from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 from services.yolo_service import (detect_image, get_model_information,)
 from uuid import uuid4
+from services.annotation_mapper import (map_yolo_detections_to_annotations,)
 
 router = APIRouter(
     prefix="/yolo",
@@ -34,11 +35,11 @@ async def detect_yolo_image(
     file: UploadFile = File(...),
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.45,
-    analysis_id = uuid4().hex
 ) -> dict[str, object]:
     """
     업로드한 이미지에서 병변 Bounding Box를 탐지한다.
     """
+    analysis_id = uuid4().hex # 요청할 때마다 새 analysis_id 생성
     if not file.filename:
         raise HTTPException(
             status_code=400,
@@ -95,6 +96,11 @@ async def detect_yolo_image(
             confidence_threshold,
             iou_threshold,
         )
+        annotations = map_yolo_detections_to_annotations(
+            result["detections"],
+            media_type="image",
+        )
+
         
         
         return {
@@ -110,6 +116,7 @@ async def detect_yolo_image(
                 "origin": "top_left",
             },
             **result,
+            "annotations":annotations,
         }
 
 

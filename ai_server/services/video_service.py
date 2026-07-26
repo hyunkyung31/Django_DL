@@ -7,6 +7,7 @@ from PIL import Image
 from services.gradcam_service import generate_gradcam_data
 import numpy as np
 from services.yolo_service import detect_image
+from services.annotation_mapper import (map_yolo_detections_to_annotations,)
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -932,6 +933,14 @@ def detect_video_frames(
                 detection["detection_id"] = (
                     f"frame_{processed_frames}_det_{detection_index}"
                 )
+                
+            annotations = map_yolo_detections_to_annotations(
+                detections,
+                media_type="video",
+                frame_index=processed_frames,
+            )
+                
+            
 
             frame_results.append(
                 {
@@ -951,6 +960,7 @@ def detect_video_frames(
                         detection_result["detection_count"]
                     ),
                     "detections": detections,
+                    "annotations": annotations,
                 }
             )
 
