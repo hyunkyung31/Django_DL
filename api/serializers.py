@@ -41,6 +41,9 @@ class PatientListResponseSerializer(serializers.Serializer):
     results = PatientSerializer(many=True)
 
 class ExaminationSerializer(serializers.ModelSerializer):
+    key_frame_url = serializers.SerializerMethodField()
+    video_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Examination
         fields = [
@@ -49,8 +52,28 @@ class ExaminationSerializer(serializers.ModelSerializer):
             "vessel_type",
             "video_path",
             "key_frame_path",
+            "key_frame_url",
+            "video_url",
         ]
+
+    def get_key_frame_url(self, obj):
+        from api.media_utils import build_media_url
+
+        request = self.context.get("request")
+        if request is None:
+            return None
+        return build_media_url(request, obj.key_frame_path)
+
+    def get_video_url(self, obj):
+        from api.media_utils import build_media_url
+
+        request = self.context.get("request")
+        if request is None:
+            return None
+        return build_media_url(request, obj.video_path)
 class AIResultSerializer(serializers.ModelSerializer):
+    gradcam_url = serializers.SerializerMethodField()
+
     class Meta:
         model = AIResult
         fields = [
@@ -61,11 +84,20 @@ class AIResultSerializer(serializers.ModelSerializer):
             "confidence_score",
             "ai_bbox_data",
             "gradcam_path",
+            "gradcam_url",
             "heart_score",
             "mace_risk_percent",
             "doctor_opinion",
             "is_confirmed",
         ]
+
+    def get_gradcam_url(self, obj):
+        from api.media_utils import build_media_url
+
+        request = self.context.get("request")
+        if request is None:
+            return None
+        return build_media_url(request, obj.gradcam_path)
 class PatientDetailSerializer(serializers.Serializer):
     patient = PatientSerializer()
     examinations = ExaminationSerializer(many=True)

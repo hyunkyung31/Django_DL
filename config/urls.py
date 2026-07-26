@@ -10,6 +10,8 @@ from api.views import (
     patient_search,
     ai_predict,
     ai_gradcam,
+    media_local,
+    patient_media_upload,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -30,7 +32,9 @@ urlpatterns = [
     path("api/doctors/", doctor_list),
     path("api/patients/", patient_list),
     path("api/patients/search/", patient_search),
+    path("api/patients/<str:patient_id>/media/", patient_media_upload),
     path("api/patients/<str:patient_id>/", patient_detail),
+    path("api/media/local/", media_local),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
         "api/docs/",
