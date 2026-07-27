@@ -73,8 +73,7 @@ def health_check() -> dict[str, object]:
         ]
     )
 
-    # 이미 로딩된 YOLO 객체에서 클래스와 입력 크기 등
-    # 프론트·운영 점검에 필요한 기본 정보만 가져온다.
+    # 가중치가 없어도 health는 200을 주고, YOLO 준비 여부만 표시한다.
     yolo_information = get_model_information()
 
     return {
@@ -102,23 +101,24 @@ def health_check() -> dict[str, object]:
                 },
             },
             "yolo": {
-                "loaded": yolo_model_loaded,
+                "loaded": bool(yolo_information.get("loaded")),
                 "weights_exist": (
                     yolo_weights_exist
                 ),
                 "weights_filename": (
                     YOLO_MODEL_PATH.name
                 ),
-                "task": yolo_information["task"],
+                "task": yolo_information.get("task"),
                 "class_count": (
-                    yolo_information["class_count"]
+                    yolo_information.get("class_count", 0)
                 ),
                 "class_names": (
-                    yolo_information["class_names"]
+                    yolo_information.get("class_names", {})
                 ),
                 "image_size": (
-                    yolo_information["image_size"]
+                    yolo_information.get("image_size")
                 ),
+                "detail": yolo_information.get("detail"),
             },
         },
     }

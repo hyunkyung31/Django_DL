@@ -1,5 +1,37 @@
 from rest_framework import serializers
-from api.models import Doctor, Patient, Examination, AIResult
+from api.models import Doctor, Patient, Examination, AIResult, Bookmark
+
+import os
+from django.conf import settings
+from api.media_utils import build_media_url
+
+def _normalize_ecg_type(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    raw = raw.strip()
+    mapping = {
+        "Normal": "Normal",
+        "Nonspecific": "Nonspecific",
+        "ST_Depression": "ST_Depression",
+        "정상": "Normal",
+        "비특이": "Nonspecific",
+        "비특이적": "Nonspecific",
+        "ST하강": "ST_Depression",
+        "ST 하강": "ST_Depression",
+    }
+    return mapping.get(raw)
+
+
+def _build_ecg_image_url(request, patient) -> str | None:
+    ecg_type = _normalize_ecg_type(getattr(patient, "ecg_result", None))
+    if not request or not ecg_type:
+        return None
+    relative = f"ecg/{patient.patient_id}_{ecg_type}.png"
+    full = os.path.join(settings.MEDIA_ROOT, "ecg", f"{patient.patient_id}_{ecg_type}.png")
+    if not os.path.isfile(full):
+        return None
+    return build_media_url(request, relative)
+
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -23,6 +55,7 @@ class DoctorSerializer(serializers.ModelSerializer):
 
 
 class PatientSerializer(serializers.ModelSerializer):
+    ecg_image_url = serializers.SerializerMethodField()
     class Meta:
         model = Patient
         fields = [
@@ -33,12 +66,68 @@ class PatientSerializer(serializers.ModelSerializer):
             "primary_doctor_id",
             "chief_complaint",
             "ecg_result",
+            "ecg_image_url",
+            "troponin_t_level",
+            "history_score",
+            "risk_factors_count",
         ]
+
+    def get_ecg_image_url(self, obj):
+        return _build_ecg_image_url(self.context.get("request"), obj)
+
+class PatientListItemSerializer(serializers.ModelSerializer):
+    """목록/홈용: 환자 + 최근 AI 판정 요약"""
+
+    latest_severity_class = serializers.SerializerMethodField()
+    has_lesion = serializers.SerializerMethodField()
+    ecg_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Patient
+        fields = [
+            "patient_id",
+            "patient_name",
+            "gender",
+            "age",
+            "primary_doctor_id",
+            "chief_complaint",
+            "ecg_result",
+            "ecg_image_url",
+            "troponin_t_level",
+            "history_score",
+            "risk_factors_count",
+            "latest_severity_class",
+            "has_lesion",
+        ]
+
+    def _latest_ai(self, obj):
+        exam = (
+            Examination.objects.filter(patient_id=obj.patient_id)
+            .order_by("-exam_id")
+            .first()
+        )
+        if not exam:
+            return None
+        return AIResult.objects.filter(exam_id=exam.exam_id).first()
+
+    def get_latest_severity_class(self, obj):
+        ai = self._latest_ai(obj)
+        return ai.severity_class if ai else None
+
+    def get_has_lesion(self, obj):
+        ai = self._latest_ai(obj)
+        if ai is None:
+            return None
+        return bool(ai.has_lesion)
+
+    def get_ecg_image_url(self, obj):
+        return _build_ecg_image_url(self.context.get("request"), obj)
+
 
 class PatientListResponseSerializer(serializers.Serializer):
     doctor_id = serializers.CharField()
     count = serializers.IntegerField()
-    results = PatientSerializer(many=True)
+    results = PatientListItemSerializer(many=True)
 
 class ExaminationSerializer(serializers.ModelSerializer):
     key_frame_url = serializers.SerializerMethodField()
@@ -102,3 +191,29 @@ class PatientDetailSerializer(serializers.Serializer):
     patient = PatientSerializer()
     examinations = ExaminationSerializer(many=True)
     ai_results = AIResultSerializer(many=True)
+
+class BookmarkSerializer(serializers.ModelSerializer):
+    snapshot_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Bookmark  # 위에서 from api.models import ... Bookmark 추가 필요
+        fields = [
+            "id",
+            "doctor_id",
+            "patient_id",
+            "exam_id",
+            "title",
+            "note",
+            "frame_number",
+            "bbox_data",
+            "snapshot_path",
+            "snapshot_url",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "doctor_id", "created_at", "updated_at", "snapshot_url"]
+
+    def get_snapshot_url(self, obj):
+        from api.media_utils import build_media_url
+        request = self.context.get("request")
+        return build_media_url(request, obj.snapshot_path)

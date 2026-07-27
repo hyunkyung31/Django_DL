@@ -40,22 +40,46 @@ def load_yolo_model() -> YOLO:
     return loaded_model
 
 
-# 이 모듈이 처음 import될 때 가중치를 한 번만 로딩한다.
-yolo_model = load_yolo_model()
+# 가중치가 없어도 서버는 기동하고, 실제 탐지 시점에 로딩한다.
+yolo_model: YOLO | None = None
+
+
+def get_yolo_model() -> YOLO:
+    """필요할 때 YOLO 모델을 한 번만 로딩한다."""
+    global yolo_model
+    if yolo_model is None:
+        yolo_model = load_yolo_model()
+    return yolo_model
 
 
 def get_model_information() -> dict[str, Any]:
     """
     현재 로딩된 YOLO 모델의 기본 정보를 반환한다.
+    가중치가 없으면 loaded=False 형태의 요약만 반환한다.
     """
+    if not MODEL_PATH.exists():
+        return {
+            "model_name": MODEL_PATH.name,
+            "loaded": False,
+            "task": None,
+            "class_count": 0,
+            "class_names": {},
+            "image_size": YOLO_IMAGE_SIZE,
+            "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+            "iou_threshold": YOLO_IOU_THRESHOLD,
+            "detail": f"weights missing: {MODEL_PATH}",
+        }
+
+    model = get_yolo_model()
     class_names = {
         int(class_id): str(class_name)
-        for class_id, class_name in yolo_model.names.items()
+        for class_id, class_name in model.names.items()
     }
 
     return {
         "model_name": MODEL_PATH.name,
-        "task": str(yolo_model.task),
+        "loaded": True,
+        "task": str(model.task),
         "class_count": len(class_names),
         "class_names": class_names,
         "image_size": YOLO_IMAGE_SIZE,
@@ -109,7 +133,8 @@ def detect_image(
             "image는 PIL.Image.Image 또는 numpy.ndarray이어야 합니다."
         )
 
-    results = yolo_model.predict(
+    model = get_yolo_model()
+    results = model.predict(
         source=input_image,
         imgsz=YOLO_IMAGE_SIZE,
         conf=confidence_threshold,
