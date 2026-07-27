@@ -302,6 +302,7 @@ def patient_media_upload(request, patient_id):
         status=status.HTTP_201_CREATED,
     )
 
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def media_gcs(request):
@@ -320,3 +321,17 @@ def media_gcs(request):
         raise Http404("file not found")
     content_type = blob.content_type or "application/octet-stream"
     return FileResponse(io.BytesIO(data), content_type=content_type)
+
+
+@extend_schema(tags=["ai"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def ai_image_analyze(request):
+    """팀원 min 브랜치: 이미지 통합 분석 (YOLO+GradCAM 등) → AI /analysis/image"""
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response(
+            {"detail": "file 필드에 이미지를 업로드해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return _forward_to_ai("/analysis/image", uploaded)

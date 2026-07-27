@@ -10,6 +10,7 @@ from api.views import (
     patient_search,
     ai_predict,
     ai_gradcam,
+    ai_image_analyze,
     media_local,
     media_gcs,
     patient_media_upload,
@@ -44,5 +45,6 @@ urlpatterns = [
     ),
     path("api/ai/predict/", ai_predict),
     path("api/ai/gradcam/", ai_gradcam),
+    path("api/ai/image-analyze/", ai_image_analyze),
     path("api/media/gcs/", media_gcs),
 ]
