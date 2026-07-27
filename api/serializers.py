@@ -32,12 +32,60 @@ class PatientSerializer(serializers.ModelSerializer):
             "primary_doctor_id",
             "chief_complaint",
             "ecg_result",
+            "troponin_t_level",
+            "history_score",
+            "risk_factors_count",
         ]
+
+
+class PatientListItemSerializer(serializers.ModelSerializer):
+    """목록/홈용: 환자 + 최근 AI 판정 요약"""
+
+    latest_severity_class = serializers.SerializerMethodField()
+    has_lesion = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Patient
+        fields = [
+            "patient_id",
+            "patient_name",
+            "gender",
+            "age",
+            "primary_doctor_id",
+            "chief_complaint",
+            "ecg_result",
+            "troponin_t_level",
+            "history_score",
+            "risk_factors_count",
+            "latest_severity_class",
+            "has_lesion",
+        ]
+
+    def _latest_ai(self, obj):
+        exam = (
+            Examination.objects.filter(patient_id=obj.patient_id)
+            .order_by("-exam_id")
+            .first()
+        )
+        if not exam:
+            return None
+        return AIResult.objects.filter(exam_id=exam.exam_id).first()
+
+    def get_latest_severity_class(self, obj):
+        ai = self._latest_ai(obj)
+        return ai.severity_class if ai else None
+
+    def get_has_lesion(self, obj):
+        ai = self._latest_ai(obj)
+        if ai is None:
+            return None
+        return bool(ai.has_lesion)
+
 
 class PatientListResponseSerializer(serializers.Serializer):
     doctor_id = serializers.CharField()
     count = serializers.IntegerField()
-    results = PatientSerializer(many=True)
+    results = PatientListItemSerializer(many=True)
 
 class ExaminationSerializer(serializers.ModelSerializer):
     key_frame_url = serializers.SerializerMethodField()

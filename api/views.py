@@ -20,6 +20,7 @@ from api.serializers import (
     LoginResponseSerializer,
     DoctorSerializer,
     PatientSerializer,
+    PatientListItemSerializer,
     PatientListResponseSerializer,
     ExaminationSerializer,
     AIResultSerializer,
@@ -100,7 +101,7 @@ def patient_list(request):
         .filter(primary_doctor_id=doctor_id)
         .order_by("patient_id")
     )
-    results = PatientSerializer(patients, many=True).data
+    results = PatientListItemSerializer(patients, many=True).data
     return Response({
         "doctor_id": doctor_id,
         "count": len(results),
@@ -154,7 +155,7 @@ def patient_search(request):
         Q(patient_id__icontains=q) | Q(patient_name__icontains=q)
     ).order_by("patient_id")[:50]
 
-    results = PatientSerializer(patients, many=True).data
+    results = PatientListItemSerializer(patients, many=True).data
     return Response({
         "doctor_id": request.user.username,
         "count": len(results),
