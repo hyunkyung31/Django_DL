@@ -423,7 +423,10 @@ class EMRSignOffListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         with transaction.atomic():
-            serializer.save(doctor_id=self.request.user.username)
+            obj = serializer.save(doctor_id=self.request.user.username)
+            if obj.emr_transmitted and not obj.transmitted_at:
+                obj.transmitted_at = timezone.now()
+                obj.save(update_fields=["transmitted_at"])
 
 
 class EMRSignOffDetailView(generics.RetrieveUpdateAPIView):
