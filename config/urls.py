@@ -13,6 +13,8 @@ from api.views import (
     media_local,
     media_gcs,
     patient_media_upload,
+    bookmark_detail,
+    bookmark_list,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -35,6 +37,8 @@ urlpatterns = [
     path("api/patients/search/", patient_search),
     path("api/patients/<str:patient_id>/media/", patient_media_upload),
     path("api/patients/<str:patient_id>/", patient_detail),
+    path("api/bookmarks/", bookmark_list),
+    path("api/bookmarks/<int:bookmark_id>/", bookmark_detail),
     path("api/media/local/", media_local),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(

@@ -1,6 +1,5 @@
 from rest_framework import serializers
-from api.models import Doctor, Patient, Examination, AIResult
-
+from api.models import Doctor, Patient, Examination, AIResult, Bookmark
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
@@ -102,3 +101,29 @@ class PatientDetailSerializer(serializers.Serializer):
     patient = PatientSerializer()
     examinations = ExaminationSerializer(many=True)
     ai_results = AIResultSerializer(many=True)
+
+class BookmarkSerializer(serializers.ModelSerializer):
+    snapshot_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Bookmark  # 위에서 from api.models import ... Bookmark 추가 필요
+        fields = [
+            "id",
+            "doctor_id",
+            "patient_id",
+            "exam_id",
+            "title",
+            "note",
+            "frame_number",
+            "bbox_data",
+            "snapshot_path",
+            "snapshot_url",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "doctor_id", "created_at", "updated_at", "snapshot_url"]
+
+    def get_snapshot_url(self, obj):
+        from api.media_utils import build_media_url
+        request = self.context.get("request")
+        return build_media_url(request, obj.snapshot_path)

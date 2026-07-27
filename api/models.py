@@ -73,3 +73,23 @@ class AIResult(models.Model):
         managed = False
     def __str__(self):
         return f"AIResult({self.exam_id})"
+
+class Bookmark(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    doctor_id = models.CharField(max_length=20)
+    patient_id = models.CharField(max_length=50, null=True, blank=True)
+    exam_id = models.IntegerField(null=True, blank=True)
+    title = models.CharField(max_length=200)
+    note = models.TextField(null=True, blank=True)
+    frame_number = models.IntegerField(null=True, blank=True)
+    bbox_data = models.JSONField()
+    snapshot_path = models.CharField(max_length=512, null=True, blank=True)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "bookmarks"
+        managed = False
+
+    def __str__(self):
+        return f"Bookmark({self.id}, {self.title})"

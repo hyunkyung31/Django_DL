@@ -13,7 +13,7 @@ from django.db.models import Q
 from django.db.models import Max
 from django.http import FileResponse
 
-from api.models import Doctor, Patient, Examination, AIResult
+from api.models import Doctor, Patient, Examination, AIResult, Bookmark
 from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
 from api.serializers import (
     LoginSerializer,
@@ -24,8 +24,10 @@ from api.serializers import (
     ExaminationSerializer,
     AIResultSerializer,
     PatientDetailSerializer,
+    BookmarkSerializer,
 )
 
+from django.utils import timezone
 from django.http import FileResponse, Http404
 from google.cloud import storage
 import io
@@ -320,3 +322,72 @@ def media_gcs(request):
         raise Http404("file not found")
     content_type = blob.content_type or "application/octet-stream"
     return FileResponse(io.BytesIO(data), content_type=content_type)
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def bookmark_list(request):
+    doctor_id = request.user.username
+
+    if request.method == "GET":
+        qs = Bookmark.objects.filter(doctor_id=doctor_id).order_by("-updated_at")
+        patient_id = (request.query_params.get("patient_id") or "").strip()
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        data = BookmarkSerializer(qs, many=True, context={"request": request}).data
+        return Response({
+            "doctor_id": doctor_id,
+            "count": len(data),
+            "results": data,
+        })
+
+    # POST
+    ser = BookmarkSerializer(data=request.data, context={"request": request})
+    if not ser.is_valid():
+        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    bookmark = Bookmark.objects.create(
+        doctor_id=doctor_id,
+        patient_id=ser.validated_data.get("patient_id"),
+        exam_id=ser.validated_data.get("exam_id"),
+        title=ser.validated_data["title"],
+        note=ser.validated_data.get("note"),
+        frame_number=ser.validated_data.get("frame_number"),
+        bbox_data=ser.validated_data.get("bbox_data") or [],
+        snapshot_path=ser.validated_data.get("snapshot_path"),
+        created_at=now,
+        updated_at=now,
+    )
+    out = BookmarkSerializer(bookmark, context={"request": request}).data
+    return Response(out, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def bookmark_detail(request, bookmark_id):
+    doctor_id = request.user.username
+    bookmark = Bookmark.objects.filter(id=bookmark_id, doctor_id=doctor_id).first()
+    if bookmark is None:
+        return Response({"detail": "북마크를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(BookmarkSerializer(bookmark, context={"request": request}).data)
+
+    if request.method == "DELETE":
+        bookmark.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # PATCH — 최신본 덮어쓰기
+    ser = BookmarkSerializer(
+        bookmark, data=request.data, partial=True, context={"request": request}
+    )
+    if not ser.is_valid():
+        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    for field in ("patient_id", "exam_id", "title", "note", "frame_number", "bbox_data", "snapshot_path"):
+        if field in ser.validated_data:
+            setattr(bookmark, field, ser.validated_data[field])
+    bookmark.updated_at = timezone.now()
+    bookmark.save()
+
+    return Response(BookmarkSerializer(bookmark, context={"request": request}).data)
