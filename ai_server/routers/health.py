@@ -52,15 +52,19 @@ def health_check() -> dict[str, object]:
         inception_model is not None
     )
 
-    # YOLO 모델 객체가 생성되어 있고
-    # 가중치 파일도 실제로 존재하는지 각각 확인한다.
+    # YOLO 가중치 존재 여부. 실제 로딩은 lazy이므로
+    # get_model_information() 이후에 loaded 상태를 판정한다.
     yolo_weights_exist = (
         YOLO_MODEL_PATH.is_file()
     )
 
-    yolo_model_loaded = (
-        yolo_model is not None
-    )
+    # 가중치가 없어도 health는 200을 주고, YOLO 준비 여부만 표시한다.
+    # (가중치가 있으면 이 호출에서 한 번 로딩한다.)
+    yolo_information = get_model_information()
+
+    yolo_model_loaded = bool(
+        yolo_information.get("loaded")
+    ) or (yolo_model is not None)
 
     # 두 모델과 두 가중치가 모두 준비된 경우에만
     # 전체 추론 서버 상태를 ready로 판단한다.
@@ -72,9 +76,6 @@ def health_check() -> dict[str, object]:
             yolo_model_loaded,
         ]
     )
-
-    # 가중치가 없어도 health는 200을 주고, YOLO 준비 여부만 표시한다.
-    yolo_information = get_model_information()
 
     return {
         # 서버 자체는 이 응답을 반환할 수 있으므로 running 상태다.
