@@ -9,6 +9,7 @@ from routers.yolo import router as yolo_router
 from services.video_service import GRADCAM_OUTPUT_DIR, OUTPUT_DIR
 from routers.annotation import router as annotation_router
 from routers import analysis
+from routers.analysis import router as analysis_router
 
 
 
@@ -85,7 +86,7 @@ app.include_router(inception_router)
 app.include_router(video_router)
 app.include_router(yolo_router)
 app.include_router(annotation_router)
-app.include_router(analysis.router)
+app.include_router(analysis_router)
 
 
 
