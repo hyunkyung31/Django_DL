@@ -3,11 +3,9 @@
 from functools import partial
 from io import BytesIO
 from uuid import uuid4
-
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
-
 from services.gradcam_service import generate_gradcam
 from services.yolo_service import detect_image, get_model_information
 
