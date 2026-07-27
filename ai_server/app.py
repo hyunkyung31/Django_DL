@@ -8,6 +8,8 @@ from routers.video import router as video_router
 from routers.yolo import router as yolo_router
 from services.video_service import GRADCAM_OUTPUT_DIR, OUTPUT_DIR
 from routers.annotation import router as annotation_router
+from routers import analysis
+
 
 
 app = FastAPI(
@@ -83,6 +85,9 @@ app.include_router(inception_router)
 app.include_router(video_router)
 app.include_router(yolo_router)
 app.include_router(annotation_router)
+app.include_router(analysis.router)
+
+
 
 # GET 요청을 처리하는 기본 API 경로uvicorn app:app --reload --port 8001
 @app.get("/")
