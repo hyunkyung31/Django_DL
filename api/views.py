@@ -5,15 +5,16 @@ from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, generics
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_spectacular.utils import extend_schema
+from django.db import transaction
 from django.db.models import Q
 
 from django.db.models import Max
 from django.http import FileResponse
 
-from api.models import Doctor, Patient, Examination, AIResult, Bookmark
+from api.models import Doctor, Patient, Examination, AIResult, Bookmark, EMRSignOff
 from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
 from api.serializers import (
     LoginSerializer,
@@ -26,6 +27,7 @@ from api.serializers import (
     AIResultSerializer,
     PatientDetailSerializer,
     BookmarkSerializer,
+    EMRSignOffSerializer,
 )
 
 from django.utils import timezone
@@ -412,3 +414,26 @@ def bookmark_detail(request, bookmark_id):
     bookmark.save()
 
     return Response(BookmarkSerializer(bookmark, context={"request": request}).data)
+
+
+class EMRSignOffListCreateView(generics.ListCreateAPIView):
+    queryset = EMRSignOff.objects.all().order_by("-created_at")
+    serializer_class = EMRSignOffSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            serializer.save(doctor_id=self.request.user.username)
+
+
+class EMRSignOffDetailView(generics.RetrieveUpdateAPIView):
+    queryset = EMRSignOff.objects.all()
+    serializer_class = EMRSignOffSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            obj = serializer.save()
+            if obj.emr_transmitted and not obj.transmitted_at:
+                obj.transmitted_at = timezone.now()
+                obj.save(update_fields=["transmitted_at"])

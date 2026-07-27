@@ -16,6 +16,8 @@ from api.views import (
     patient_media_upload,
     bookmark_detail,
     bookmark_list,
+    EMRSignOffListCreateView,
+    EMRSignOffDetailView,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -40,6 +42,8 @@ urlpatterns = [
     path("api/patients/<str:patient_id>/", patient_detail),
     path("api/bookmarks/", bookmark_list),
     path("api/bookmarks/<int:bookmark_id>/", bookmark_detail),
+    path("api/emr-signoffs/", EMRSignOffListCreateView.as_view()),
+    path("api/emr-signoffs/<int:pk>/", EMRSignOffDetailView.as_view()),
     path("api/media/local/", media_local),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(

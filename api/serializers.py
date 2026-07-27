@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from api.models import Doctor, Patient, Examination, AIResult, Bookmark
+from api.models import Doctor, Patient, Examination, AIResult, Bookmark, EMRSignOff
 
 import os
 from django.conf import settings
@@ -217,3 +217,22 @@ class BookmarkSerializer(serializers.ModelSerializer):
         from api.media_utils import build_media_url
         request = self.context.get("request")
         return build_media_url(request, obj.snapshot_path)
+
+
+class EMRSignOffSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EMRSignOff
+        fields = [
+            "id",
+            "patient_id",
+            "doctor_id",
+            "finalized",
+            "final_result",
+            "ai_result",
+            "emr_transmitted",
+            "transmitted_at",
+            "report_ready",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ("id", "doctor_id", "created_at", "updated_at", "transmitted_at")

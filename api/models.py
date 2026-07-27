@@ -93,3 +93,24 @@ class Bookmark(models.Model):
 
     def __str__(self):
         return f"Bookmark({self.id}, {self.title})"
+
+
+class EMRSignOff(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    patient_id = models.CharField(max_length=50, db_index=True)
+    doctor_id = models.CharField(max_length=20, db_index=True)
+    finalized = models.BooleanField(default=False)
+    final_result = models.TextField(blank=True, default="")
+    ai_result = models.JSONField(null=True, blank=True)
+    emr_transmitted = models.BooleanField(default=False)
+    transmitted_at = models.DateTimeField(null=True, blank=True)
+    report_ready = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "emr_signoffs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"EMRSignOff({self.id}, {self.patient_id}, {self.doctor_id})"
