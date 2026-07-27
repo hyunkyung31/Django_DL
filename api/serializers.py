@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from api.models import Doctor, Patient, Examination, AIResult, Bookmark, EMRSignOff
+from api.models import Doctor, Patient, Examination, AIResult, Bookmark, Consultation, Notification, EMRSignOff
 
 import os
 from django.conf import settings
@@ -217,6 +217,64 @@ class BookmarkSerializer(serializers.ModelSerializer):
         from api.media_utils import build_media_url
         request = self.context.get("request")
         return build_media_url(request, obj.snapshot_path)
+
+
+class ConsultationCreateSerializer(serializers.Serializer):
+    patient_id = serializers.CharField(max_length=50)
+    receiver_id = serializers.CharField(max_length=20)
+    reason = serializers.CharField()
+
+    def to_internal_value(self, data):
+        # 프론트 camelCase / snake_case 모두 허용
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        if "patientId" in data and "patient_id" not in data:
+            data["patient_id"] = data.get("patientId")
+        if "receiverId" in data and "receiver_id" not in data:
+            data["receiver_id"] = data.get("receiverId")
+        return super().to_internal_value(data)
+
+
+class ConsultationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultation
+        fields = [
+            "id",
+            "patient_id",
+            "requester_id",
+            "receiver_id",
+            "reason",
+            "status",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    type = serializers.CharField(source="notification_type", read_only=True)
+    consultation_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Notification
+        fields = [
+            "id",
+            "type",
+            "title",
+            "message",
+            "consultation_id",
+            "is_read",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_consultation_id(self, obj):
+        raw = obj.consultation_id
+        if raw is None or raw == "":
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return raw
+
 
 
 class EMRSignOffSerializer(serializers.ModelSerializer):

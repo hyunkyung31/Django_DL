@@ -95,6 +95,43 @@ class Bookmark(models.Model):
         return f"Bookmark({self.id}, {self.title})"
 
 
+class Consultation(models.Model):
+    """협진 요청. Doctor는 unmanaged라 FK 대신 doctor_id 문자열을 사용."""
+
+    id = models.BigAutoField(primary_key=True)
+    patient_id = models.CharField(max_length=50)
+    requester_id = models.CharField(max_length=20)
+    receiver_id = models.CharField(max_length=20, db_index=True)
+    reason = models.TextField()
+    status = models.CharField(max_length=20, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "consultations"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Consultation({self.id}, {self.patient_id} → {self.receiver_id})"
+
+
+class Notification(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    recipient_doctor_id = models.CharField(max_length=20, db_index=True)
+    notification_type = models.CharField(max_length=30, default="consultation")
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    consultation_id = models.CharField(max_length=50, null=True, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "notifications"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Notification({self.id}, {self.recipient_doctor_id}, {self.title})"
+
+
 class EMRSignOff(models.Model):
     id = models.BigAutoField(primary_key=True)
     patient_id = models.CharField(max_length=50, db_index=True)

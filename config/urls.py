@@ -16,6 +16,9 @@ from api.views import (
     patient_media_upload,
     bookmark_detail,
     bookmark_list,
+    consultation_list,
+    notification_list,
+    notification_mark_read,
     EMRSignOffListCreateView,
     EMRSignOffDetailView,
 )
@@ -44,6 +47,9 @@ urlpatterns = [
     path("api/bookmarks/<int:bookmark_id>/", bookmark_detail),
     path("api/emr-signoffs/", EMRSignOffListCreateView.as_view()),
     path("api/emr-signoffs/<int:pk>/", EMRSignOffDetailView.as_view()),
+    path("api/consultations/", consultation_list),
+    path("api/notifications/", notification_list),
+    path("api/notifications/<int:notification_id>/read/", notification_mark_read),
     path("api/media/local/", media_local),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
