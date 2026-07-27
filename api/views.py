@@ -297,3 +297,16 @@ def patient_media_upload(request, patient_id):
         },
         status=status.HTTP_201_CREATED,
     )
+    
+    
+@extend_schema(tags=["ai"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def ai_image_analyze(request):
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return Response(
+            {"detail": "file 필드에 이미지를 업로드해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,)
+    return _forward_to_ai("/analysis/image", uploaded)
+    
