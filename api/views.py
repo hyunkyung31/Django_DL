@@ -101,7 +101,9 @@ def patient_list(request):
         .filter(primary_doctor_id=doctor_id)
         .order_by("patient_id")
     )
-    results = PatientListItemSerializer(patients, many=True).data
+    results = PatientListItemSerializer(
+        patients, many=True, context={"request": request}
+    ).data
     return Response({
         "doctor_id": doctor_id,
         "count": len(results),
@@ -126,7 +128,7 @@ def patient_detail(request, patient_id):
     exam_ids = [e.exam_id for e in exams]
     ai_results = AIResult.objects.filter(exam_id__in=exam_ids)
     return Response({
-        "patient": PatientSerializer(patient).data,
+        "patient": PatientSerializer(patient, context={"request": request}).data,
         "examinations": ExaminationSerializer(
             exams, many=True, context={"request": request}
         ).data,
@@ -155,7 +157,9 @@ def patient_search(request):
         Q(patient_id__icontains=q) | Q(patient_name__icontains=q)
     ).order_by("patient_id")[:50]
 
-    results = PatientListItemSerializer(patients, many=True).data
+    results = PatientListItemSerializer(
+        patients, many=True, context={"request": request}
+    ).data
     return Response({
         "doctor_id": request.user.username,
         "count": len(results),

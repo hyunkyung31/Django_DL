@@ -1,5 +1,38 @@
 from rest_framework import serializers
 from api.models import Doctor, Patient, Examination, AIResult, Bookmark
+
+import os
+from django.conf import settings
+from api.media_utils import build_media_url
+
+def _normalize_ecg_type(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    raw = raw.strip()
+    mapping = {
+        "Normal": "Normal",
+        "Nonspecific": "Nonspecific",
+        "ST_Depression": "ST_Depression",
+        "정상": "Normal",
+        "비특이": "Nonspecific",
+        "비특이적": "Nonspecific",
+        "ST하강": "ST_Depression",
+        "ST 하강": "ST_Depression",
+    }
+    return mapping.get(raw)
+
+
+def _build_ecg_image_url(request, patient) -> str | None:
+    ecg_type = _normalize_ecg_type(getattr(patient, "ecg_result", None))
+    if not request or not ecg_type:
+        return None
+    relative = f"ecg/{patient.patient_id}_{ecg_type}.png"
+    full = os.path.join(settings.MEDIA_ROOT, "ecg", f"{patient.patient_id}_{ecg_type}.png")
+    if not os.path.isfile(full):
+        return None
+    return build_media_url(request, relative)
+
+
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
@@ -22,6 +55,7 @@ class DoctorSerializer(serializers.ModelSerializer):
 
 
 class PatientSerializer(serializers.ModelSerializer):
+    ecg_image_url = serializers.SerializerMethodField()
     class Meta:
         model = Patient
         fields = [
@@ -32,17 +66,21 @@ class PatientSerializer(serializers.ModelSerializer):
             "primary_doctor_id",
             "chief_complaint",
             "ecg_result",
+            "ecg_image_url",
             "troponin_t_level",
             "history_score",
             "risk_factors_count",
         ]
 
+    def get_ecg_image_url(self, obj):
+        return _build_ecg_image_url(self.context.get("request"), obj)
 
 class PatientListItemSerializer(serializers.ModelSerializer):
     """목록/홈용: 환자 + 최근 AI 판정 요약"""
 
     latest_severity_class = serializers.SerializerMethodField()
     has_lesion = serializers.SerializerMethodField()
+    ecg_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -54,6 +92,7 @@ class PatientListItemSerializer(serializers.ModelSerializer):
             "primary_doctor_id",
             "chief_complaint",
             "ecg_result",
+            "ecg_image_url",
             "troponin_t_level",
             "history_score",
             "risk_factors_count",
@@ -80,6 +119,9 @@ class PatientListItemSerializer(serializers.ModelSerializer):
         if ai is None:
             return None
         return bool(ai.has_lesion)
+
+    def get_ecg_image_url(self, obj):
+        return _build_ecg_image_url(self.context.get("request"), obj)
 
 
 class PatientListResponseSerializer(serializers.Serializer):
