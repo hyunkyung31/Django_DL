@@ -21,6 +21,8 @@ from api.views import (
     notification_mark_read,
     EMRSignOffListCreateView,
     EMRSignOffDetailView,
+    kakao_login,
+    kakao_signup,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -34,7 +36,9 @@ from drf_spectacular.views import (
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/health/", health_check),
-    path("api/login/", login),
+    path("api/login/", login),    
+    path("api/auth/kakao/login/", kakao_login),
+    path("api/auth/kakao/signup/", kakao_signup),
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/", me),

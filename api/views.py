@@ -13,6 +13,7 @@ from django.db.models import Q
 from django.db import transaction
 from django.db.models import Max
 from django.http import FileResponse
+from django.core import signing
 
 from api.models import (
     Doctor,
@@ -23,6 +24,7 @@ from api.models import (
     Consultation,
     Notification,
     EMRSignOff,
+    PatientAuth,
 )
 from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
 from api.serializers import (
@@ -40,6 +42,9 @@ from api.serializers import (
     ConsultationSerializer,
     NotificationSerializer,
     EMRSignOffSerializer,
+    KakaoLoginSerializer,
+    KakaoLoginResponseSerializer,
+    KakaoSignupSerializer,
 )
 
 from django.utils import timezone
@@ -77,6 +82,206 @@ def login(request):
         "refresh": str(refresh),
         "doctor_id": doctor.doctor_id,
         "doctor_name": doctor.doctor_name,
+    })
+
+SIGNUP_TOKEN_SALT = "kakao-signup"
+SIGNUP_TOKEN_MAX_AGE = 60 * 10  # 10분
+
+
+@api_view(["POST"])
+def kakao_login(request):
+    serializer = KakaoLoginSerializer(data=request.data)
+
+    if not serializer.is_valid():
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    access_token = serializer.validated_data["accessToken"]
+
+    kakao_response = requests.get(
+        "https://kapi.kakao.com/v2/user/me",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+        timeout=5,
+    )
+
+    if kakao_response.status_code != 200:
+        return Response(
+            {"message": "유효하지 않은 카카오 토큰입니다."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    kakao_user = kakao_response.json()
+    kakao_id = str(kakao_user["id"])
+
+    auth = PatientAuth.objects.filter(
+        provider="kakao",
+        provider_user_id=kakao_id,
+    ).first()
+
+    # 기존 회원
+    if auth:
+        patient = auth.patient_id  # FK 이름이 patient_id
+
+        user, _ = User.objects.get_or_create(
+            username=patient.patient_id,
+        )
+
+        refresh = RefreshToken.for_user(user)
+
+        auth.last_login = timezone.now()
+        auth.save(update_fields=["last_login"])
+
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "patient_id": patient.patient_id,
+            "patient_name": patient.patient_name,
+            "is_new_user": False,
+            "signup_token": None,
+        })
+
+    # 신규 회원
+    signer = signing.TimestampSigner(salt=SIGNUP_TOKEN_SALT)
+    signup_token = signer.sign(kakao_id)
+
+    return Response(
+        {
+            "is_new_user": True,
+            "signup_token": signup_token,
+            "access": "",
+            "refresh": "",
+            "patient_id": None,
+            "patient_name": None,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+def kakao_signup(request):
+    """
+    POST /api/auth/kakao/signup/
+    body: {
+      "signupToken": "...",
+      "phone": "01012345678",
+      "birthDate": "1990-01-01",
+      "name": "홍길동"
+    }
+    """
+    serializer = KakaoSignupSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    signup_token = serializer.validated_data["signupToken"]
+    name = serializer.validated_data["name"].strip()
+    phone = "".join(
+        ch for ch in serializer.validated_data["phone"] if ch.isdigit()
+    )
+    birth_date = serializer.validated_data["birthDate"].strip()
+
+    if not name:
+        return Response(
+            {"message": "이름은 필수입니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(phone) != 11 or not phone.startswith("010"):
+        return Response(
+            {"message": "전화번호는 010으로 시작하는 11자리여야 합니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not birth_date:
+        return Response(
+            {"message": "생년월일은 필수입니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    signer = signing.TimestampSigner(salt=SIGNUP_TOKEN_SALT)
+    try:
+        kakao_id = signer.unsign(signup_token, max_age=SIGNUP_TOKEN_MAX_AGE)
+    except signing.SignatureExpired:
+        return Response(
+            {"message": "signup_token이 만료되었습니다. 다시 로그인해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except signing.BadSignature:
+        return Response(
+            {"message": "유효하지 않은 signup_token입니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    auth = PatientAuth.objects.filter(
+        provider="kakao",
+        provider_user_id=kakao_id,
+    ).first()
+    if auth:
+        patient = auth.patient_id
+        user, _ = User.objects.get_or_create(username=patient.patient_id)
+        refresh = RefreshToken.for_user(user)
+        auth.last_login = timezone.now()
+        auth.save(update_fields=["last_login"])
+        return Response({
+            "is_new_user": False,
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "patient_id": patient.patient_id,
+            "patient_name": patient.patient_name,
+            "signup_token": None,
+        })
+
+    # 이름 + 전화번호로 매칭
+    # TODO: Patient에 birth_date 컬럼 생기면 birth_date도 조건 추가
+    qs = Patient.objects.filter(
+        phone_number=phone,
+        patient_name=name,
+    )
+
+    matched = list(qs[:2])
+    if len(matched) == 0:
+        return Response(
+            {"message": "일치하는 환자 정보가 없습니다. 회원가입이 필요합니다."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    if len(matched) > 1:
+        return Response(
+            {"message": "일치하는 환자가 여러 명입니다. 입력 정보를 다시 확인해주세요."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    patient = matched[0]
+
+    already_linked = PatientAuth.objects.filter(
+        provider="kakao",
+        patient_id=patient,
+    ).exclude(provider_user_id=kakao_id).exists()
+    if already_linked:
+        return Response(
+            {"message": "이미 다른 카카오 계정과 연결된 환자입니다."},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    PatientAuth.objects.create(
+        patient_id=patient,
+        provider="kakao",
+        provider_user_id=kakao_id,
+        email=None,
+        created_at=timezone.now(),
+        last_login=timezone.now(),
+    )
+
+    user, _ = User.objects.get_or_create(username=patient.patient_id)
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        "is_new_user": False,
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "patient_id": patient.patient_id,
+        "patient_name": patient.patient_name,
+        "signup_token": None,
     })
 
 

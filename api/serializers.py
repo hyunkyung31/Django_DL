@@ -294,3 +294,19 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ("id", "doctor_id", "created_at", "updated_at", "transmitted_at")
+
+class KakaoLoginSerializer(serializers.Serializer) :
+    accessToken = serializers.CharField()
+
+class KakaoLoginResponseSerializer(serializers.Serializer):
+    access = serializers.CharField(allow_blank=True)
+    refresh = serializers.CharField(allow_blank=True)
+    patient_id = serializers.CharField(required=False, allow_null=True)
+    patient_name = serializers.CharField(required=False, allow_null=True)
+    is_new_user = serializers.BooleanField()
+    signup_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+class KakaoSignupSerializer(serializers.Serializer):
+    signupToken = serializers.CharField()
+    phone = serializers.CharField()
+    birthDate = serializers.CharField()
+    name = serializers.CharField()

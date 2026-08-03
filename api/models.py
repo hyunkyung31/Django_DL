@@ -151,3 +151,28 @@ class EMRSignOff(models.Model):
 
     def __str__(self):
         return f"EMRSignOff({self.id}, {self.patient_id}, {self.doctor_id})"
+
+class PatientAuth(models.Model):
+    auth_id = models.BigAutoField(primary_key=True)
+
+    patient_id = models.ForeignKey(
+        Patient,
+        db_column="patient_id",
+        on_delete=models.CASCADE,)
+
+    provider = models.CharField(max_length=20)
+
+    provider_user_id = models.CharField(max_length=100)
+
+    email = models.CharField(max_length=100, null=True, blank=True)
+
+    created_at = models.DateTimeField()
+
+    last_login = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "patient_auth"
+        managed = False
+
+    def __str__(self):
+        return f"{self.provider}:{self.provider_user_id}"
