@@ -223,6 +223,14 @@ class ConsultationCreateSerializer(serializers.Serializer):
     patient_id = serializers.CharField(max_length=50)
     receiver_id = serializers.CharField(max_length=20)
     reason = serializers.CharField()
+    priority = serializers.CharField(max_length=20, required=False, default="normal")
+    memo = serializers.CharField(required=False, allow_blank=True, default="")
+    reference_types = serializers.ListField(
+        child=serializers.CharField(max_length=50),
+        required=False,
+        default=list,
+    )
+    exam_id = serializers.CharField(max_length=50, required=False, allow_null=True, allow_blank=True, default=None)
 
     def to_internal_value(self, data):
         # 프론트 camelCase / snake_case 모두 허용
@@ -231,6 +239,10 @@ class ConsultationCreateSerializer(serializers.Serializer):
             data["patient_id"] = data.get("patientId")
         if "receiverId" in data and "receiver_id" not in data:
             data["receiver_id"] = data.get("receiverId")
+        if "referenceTypes" in data and "reference_types" not in data:
+            data["reference_types"] = data.get("referenceTypes")
+        if "examId" in data and "exam_id" not in data:
+            data["exam_id"] = data.get("examId")
         return super().to_internal_value(data)
 
 
@@ -243,6 +255,10 @@ class ConsultationSerializer(serializers.ModelSerializer):
             "requester_id",
             "receiver_id",
             "reason",
+            "priority",
+            "memo",
+            "reference_types",
+            "exam_id",
             "status",
             "created_at",
         ]

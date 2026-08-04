@@ -697,6 +697,12 @@ def consultation_list(request):
     patient_id = ser.validated_data["patient_id"]
     receiver_id = ser.validated_data["receiver_id"]
     reason = ser.validated_data["reason"]
+    priority = ser.validated_data.get("priority") or "normal"
+    memo = ser.validated_data.get("memo") or ""
+    reference_types = ser.validated_data.get("reference_types") or []
+    exam_id = ser.validated_data.get("exam_id") or None
+    if exam_id == "":
+        exam_id = None
 
     if Patient.objects.filter(patient_id=patient_id).first() is None:
         return Response(
@@ -720,6 +726,10 @@ def consultation_list(request):
             requester_id=doctor_id,
             receiver_id=receiver_id,
             reason=reason,
+            priority=priority,
+            memo=memo,
+            reference_types=reference_types,
+            exam_id=exam_id,
             status="pending",
         )
         patient = Patient.objects.filter(patient_id=consultation.patient_id).first()
