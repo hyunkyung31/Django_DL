@@ -56,6 +56,7 @@ class Examination(models.Model):
         managed = False
     def __str__(self):
         return f"{self.exam_id} ({self.patient_id})"
+
 class AIResult(models.Model):
     exam_id = models.IntegerField(primary_key=True)
     confirming_doctor_id = models.CharField(max_length=50, null=True, blank=True)
@@ -98,6 +99,13 @@ class Bookmark(models.Model):
 class Consultation(models.Model):
     """협진 요청. Doctor는 unmanaged라 FK 대신 doctor_id 문자열을 사용."""
 
+    class Status(models.TextChoices):
+        PENDING = "pending", "대기"
+        IN_PROGRESS = "in_progress", "검토중"
+        ACCEPTED = "accepted", "수락됨"
+        REJECTED = "rejected", "거절됨"
+        COMPLETED = "completed", "완료"
+
     id = models.BigAutoField(primary_key=True)
     patient_id = models.CharField(max_length=50)
     requester_id = models.CharField(max_length=20, db_index=True)
@@ -107,8 +115,14 @@ class Consultation(models.Model):
     memo = models.TextField(blank=True, default="")
     reference_types = models.JSONField(default=list, blank=True)
     exam_id = models.CharField(max_length=50, null=True, blank=True)
-    status = models.CharField(max_length=20, default="pending")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "consultations"

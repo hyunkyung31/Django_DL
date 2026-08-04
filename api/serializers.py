@@ -160,6 +160,7 @@ class ExaminationSerializer(serializers.ModelSerializer):
         if request is None:
             return None
         return build_media_url(request, obj.video_path)
+
 class AIResultSerializer(serializers.ModelSerializer):
     gradcam_url = serializers.SerializerMethodField()
 
@@ -187,6 +188,7 @@ class AIResultSerializer(serializers.ModelSerializer):
         if request is None:
             return None
         return build_media_url(request, obj.gradcam_path)
+
 class PatientDetailSerializer(serializers.Serializer):
     patient = PatientSerializer()
     examinations = ExaminationSerializer(many=True)
@@ -247,13 +249,20 @@ class ConsultationCreateSerializer(serializers.Serializer):
 
 
 class ConsultationSerializer(serializers.ModelSerializer):
+    patient_name = serializers.SerializerMethodField()
+    requester_name = serializers.SerializerMethodField()
+    receiver_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Consultation
         fields = [
             "id",
             "patient_id",
+            "patient_name",
             "requester_id",
+            "requester_name",
             "receiver_id",
+            "receiver_name",
             "reason",
             "priority",
             "memo",
@@ -261,8 +270,74 @@ class ConsultationSerializer(serializers.ModelSerializer):
             "exam_id",
             "status",
             "created_at",
+            "updated_at",
         ]
         read_only_fields = fields
+
+    def get_patient_name(self, obj):
+        patient = Patient.objects.filter(
+            patient_id=obj.patient_id,
+        ).first()
+
+        if patient is None:
+            return ""
+
+        return patient.patient_name
+
+    def get_requester_name(self, obj):
+        requester = Doctor.objects.filter(
+            doctor_id=obj.requester_id,
+        ).first()
+
+        if requester is None:
+            return ""
+
+        return requester.doctor_name
+
+    def get_receiver_name(self, obj):
+        receiver = Doctor.objects.filter(
+            doctor_id=obj.receiver_id,
+        ).first()
+
+        if receiver is None:
+            return ""
+
+        return receiver.doctor_name
+
+
+class ConsultationStatusUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Consultation
+        fields = ["status"]
+
+    def validate_status(self, new_status):
+        current_status = self.instance.status
+
+        allowed_transitions = {
+            Consultation.Status.PENDING: {
+                Consultation.Status.IN_PROGRESS,
+            },
+            Consultation.Status.IN_PROGRESS: {
+                Consultation.Status.ACCEPTED,
+                Consultation.Status.REJECTED,
+            },
+            Consultation.Status.ACCEPTED: {
+                Consultation.Status.COMPLETED,
+            },
+        }
+
+        allowed_statuses = allowed_transitions.get(
+            current_status,
+            set(),
+        )
+
+        if new_status not in allowed_statuses:
+            raise serializers.ValidationError(
+                f"{current_status} 상태에서 "
+                f"{new_status} 상태로 변경할 수 없습니다."
+            )
+
+        return new_status
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -321,6 +396,7 @@ class KakaoLoginResponseSerializer(serializers.Serializer):
     patient_name = serializers.CharField(required=False, allow_null=True)
     is_new_user = serializers.BooleanField()
     signup_token = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
 class KakaoSignupSerializer(serializers.Serializer):
     signupToken = serializers.CharField()
     phone = serializers.CharField()

@@ -41,6 +41,7 @@ from api.serializers import (
     BookmarkSerializer,
     ConsultationCreateSerializer,
     ConsultationSerializer,
+    ConsultationStatusUpdateSerializer,
     NotificationSerializer,
     EMRSignOffSerializer,
     KakaoLoginSerializer,
@@ -673,50 +674,153 @@ def bookmark_detail(request, bookmark_id):
     return Response(BookmarkSerializer(bookmark, context={"request": request}).data)
 
 
-@extend_schema(tags=["consultations"])
+@extend_schema(
+    methods=["GET"],
+    responses={200: ConsultationSerializer(many=True)},
+    tags=["consultations"],
+)
+@extend_schema(
+    methods=["POST"],
+    request=ConsultationCreateSerializer,
+    responses={201: ConsultationSerializer},
+    tags=["consultations"],
+)
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def consultation_list(request):
     doctor_id = request.user.username
 
     if request.method == "GET":
-        qs = Consultation.objects.filter(
-            Q(requester_id=doctor_id) | Q(receiver_id=doctor_id)
-        ).order_by("-created_at")
-        data = ConsultationSerializer(qs, many=True).data
+        box = (
+            request.query_params.get("box")
+            or ""
+        ).strip().lower()
+
+        receiver = (
+            request.query_params.get("receiver")
+            or ""
+        ).strip().lower()
+
+        sender = (
+            request.query_params.get("sender")
+            or ""
+        ).strip().lower()
+
+        requested_status = (
+            request.query_params.get("status")
+            or ""
+        ).strip().lower()
+
+        if box == "received" or receiver == "me":
+            queryset = Consultation.objects.filter(
+                receiver_id=doctor_id,
+            )
+        elif box == "sent" or sender == "me":
+            queryset = Consultation.objects.filter(
+                requester_id=doctor_id,
+            )
+        else:
+            queryset = Consultation.objects.filter(
+                Q(requester_id=doctor_id)
+                | Q(receiver_id=doctor_id)
+            )
+
+        if requested_status:
+            valid_statuses = {
+                value
+                for value, _ in Consultation.Status.choices
+            }
+
+            if requested_status not in valid_statuses:
+                return Response(
+                    {
+                        "detail": (
+                            "올바르지 않은 협진 상태입니다."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            queryset = queryset.filter(
+                status=requested_status,
+            )
+
+        queryset = queryset.order_by("-created_at")
+
+        serializer = ConsultationSerializer(
+            queryset,
+            many=True,
+            context={"request": request},
+        )
+
         return Response({
             "doctor_id": doctor_id,
-            "count": len(data),
-            "results": data,
+            "count": queryset.count(),
+            "results": serializer.data,
         })
 
-    ser = ConsultationCreateSerializer(data=request.data)
-    if not ser.is_valid():
-        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+    serializer = ConsultationCreateSerializer(
+        data=request.data,
+    )
+    serializer.is_valid(raise_exception=True)
 
-    patient_id = ser.validated_data["patient_id"]
-    receiver_id = ser.validated_data["receiver_id"]
-    reason = ser.validated_data["reason"]
-    priority = ser.validated_data.get("priority") or "normal"
-    memo = ser.validated_data.get("memo") or ""
-    reference_types = ser.validated_data.get("reference_types") or []
-    exam_id = ser.validated_data.get("exam_id") or None
-    if exam_id == "":
-        exam_id = None
+    patient_id = serializer.validated_data[
+        "patient_id"
+    ]
+    receiver_id = serializer.validated_data[
+        "receiver_id"
+    ]
+    reason = serializer.validated_data["reason"]
 
-    if Patient.objects.filter(patient_id=patient_id).first() is None:
+    priority = (
+        serializer.validated_data.get("priority")
+        or "normal"
+    )
+
+    memo = (
+        serializer.validated_data.get("memo")
+        or ""
+    )
+
+    reference_types = (
+        serializer.validated_data.get(
+            "reference_types"
+        )
+        or []
+    )
+
+    exam_id = (
+        serializer.validated_data.get("exam_id")
+        or None
+    )
+
+    patient = Patient.objects.filter(
+        patient_id=patient_id,
+    ).first()
+
+    if patient is None:
         return Response(
             {"detail": "환자를 찾을 수 없습니다."},
             status=status.HTTP_404_NOT_FOUND,
         )
-    if Doctor.objects.filter(doctor_id=receiver_id).first() is None:
+
+    receiver = Doctor.objects.filter(
+        doctor_id=receiver_id,
+    ).first()
+
+    if receiver is None:
         return Response(
             {"detail": "수신 의사를 찾을 수 없습니다."},
             status=status.HTTP_404_NOT_FOUND,
         )
+
     if receiver_id == doctor_id:
         return Response(
-            {"detail": "본인에게는 협진을 요청할 수 없습니다."},
+            {
+                "detail": (
+                    "본인에게는 협진을 요청할 수 없습니다."
+                )
+            },
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -730,73 +834,276 @@ def consultation_list(request):
             memo=memo,
             reference_types=reference_types,
             exam_id=exam_id,
-            status="pending",
+            status=Consultation.Status.PENDING,
         )
-        patient = Patient.objects.filter(patient_id=consultation.patient_id).first()
 
         patient_label = (
-
-            f"{patient.patient_name} ({consultation.patient_id})"
-
-            if patient and getattr(patient, "patient_name", None)
-
-            else consultation.patient_id
-
+            f"{patient.patient_name} "
+            f"({patient.patient_id})"
         )
 
         Notification.objects.create(
-
-            recipient_doctor_id=consultation.receiver_id,
-
-            notification_type="consultation",
-
+            recipient_doctor_id=receiver_id,
+            notification_type=(
+                "consultation_created"
+            ),
             title="새 협진 요청",
-
-            message=f"{patient_label} 환자의 새 협진 요청이 도착했습니다.",
-
+            message=(
+                f"{patient_label} 환자의 "
+                "새 협진 요청이 도착했습니다."
+            ),
             consultation_id=str(consultation.id),
-
             is_read=False,
-
         )
 
     return Response(
-        ConsultationSerializer(consultation).data,
+        ConsultationSerializer(
+            consultation,
+            context={"request": request},
+        ).data,
         status=status.HTTP_201_CREATED,
     )
 
 
-@extend_schema(tags=["notifications"])
+@extend_schema(
+    responses={200: ConsultationSerializer},
+    tags=["consultations"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def consultation_detail(
+    request,
+    consultation_id,
+):
+    doctor_id = request.user.username
+
+    consultation = Consultation.objects.filter(
+        id=consultation_id,
+    ).first()
+
+    if consultation is None:
+        return Response(
+            {
+                "detail": (
+                    "협진 요청을 찾을 수 없습니다."
+                )
+            },
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if doctor_id not in {
+        consultation.requester_id,
+        consultation.receiver_id,
+    }:
+        return Response(
+            {
+                "detail": (
+                    "이 협진 요청을 조회할 "
+                    "권한이 없습니다."
+                )
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    return Response(
+        ConsultationSerializer(
+            consultation,
+            context={"request": request},
+        ).data,
+    )
+
+
+CONSULTATION_STATUS_MESSAGES = {
+    Consultation.Status.IN_PROGRESS: {
+        "type": "consultation_in_progress",
+        "title": "협진 검토가 시작되었습니다.",
+        "message": (
+            "수신 의료진이 협진 요청을 "
+            "검토하고 있습니다."
+        ),
+    },
+    Consultation.Status.ACCEPTED: {
+        "type": "consultation_accepted",
+        "title": "협진 요청이 수락되었습니다.",
+        "message": (
+            "수신 의료진이 협진 요청을 "
+            "수락했습니다."
+        ),
+    },
+    Consultation.Status.REJECTED: {
+        "type": "consultation_rejected",
+        "title": "협진 요청이 거절되었습니다.",
+        "message": (
+            "수신 의료진이 협진 요청을 "
+            "거절했습니다."
+        ),
+    },
+    Consultation.Status.COMPLETED: {
+        "type": "consultation_completed",
+        "title": "협진이 완료되었습니다.",
+        "message": (
+            "요청한 협진 처리가 완료되었습니다."
+        ),
+    },
+}
+
+
+@extend_schema(
+    request=ConsultationStatusUpdateSerializer,
+    responses={200: ConsultationSerializer},
+    tags=["consultations"],
+)
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def consultation_status_update(
+    request,
+    consultation_id,
+):
+    doctor_id = request.user.username
+
+    with transaction.atomic():
+        consultation = (
+            Consultation.objects
+            .select_for_update()
+            .filter(id=consultation_id)
+            .first()
+        )
+
+        if consultation is None:
+            return Response(
+                {
+                    "detail": (
+                        "협진 요청을 찾을 수 없습니다."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if consultation.receiver_id != doctor_id:
+            return Response(
+                {
+                    "detail": (
+                        "협진 요청을 받은 의료진만 "
+                        "상태를 변경할 수 있습니다."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = (
+            ConsultationStatusUpdateSerializer(
+                consultation,
+                data=request.data,
+                partial=True,
+            )
+        )
+        serializer.is_valid(raise_exception=True)
+
+        consultation = serializer.save()
+
+        notification_data = (
+            CONSULTATION_STATUS_MESSAGES.get(
+                consultation.status,
+            )
+        )
+
+        if notification_data is not None:
+            Notification.objects.create(
+                recipient_doctor_id=(
+                    consultation.requester_id
+                ),
+                notification_type=(
+                    notification_data["type"]
+                ),
+                title=notification_data["title"],
+                message=(
+                    notification_data["message"]
+                ),
+                consultation_id=str(
+                    consultation.id
+                ),
+                is_read=False,
+            )
+
+    return Response(
+        ConsultationSerializer(
+            consultation,
+            context={"request": request},
+        ).data,
+    )
+
+
+@extend_schema(
+    responses={
+        200: NotificationSerializer(many=True),
+    },
+    tags=["notifications"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def notification_list(request):
     doctor_id = request.user.username
-    qs = Notification.objects.filter(recipient_doctor_id=doctor_id).order_by("-created_at")
-    unread_only = (request.query_params.get("unread") or "").strip().lower()
+
+    queryset = Notification.objects.filter(
+        recipient_doctor_id=doctor_id,
+    ).order_by("-created_at")
+
+    unread_only = (
+        request.query_params.get("unread")
+        or ""
+    ).strip().lower()
+
     if unread_only in ("1", "true", "yes"):
-        qs = qs.filter(is_read=False)
-    data = NotificationSerializer(qs, many=True).data
-    return Response(data)
+        queryset = queryset.filter(
+            is_read=False,
+        )
+
+    serializer = NotificationSerializer(
+        queryset,
+        many=True,
+    )
+
+    return Response({
+        "count": queryset.count(),
+        "unread_count": queryset.filter(
+            is_read=False,
+        ).count(),
+        "results": serializer.data,
+    })
 
 
-@extend_schema(tags=["notifications"])
+@extend_schema(
+    responses={200: NotificationSerializer},
+    tags=["notifications"],
+)
 @api_view(["PATCH"])
 @permission_classes([IsAuthenticated])
-def notification_mark_read(request, notification_id):
+def notification_mark_read(
+    request,
+    notification_id,
+):
     doctor_id = request.user.username
+
     notification = Notification.objects.filter(
         id=notification_id,
         recipient_doctor_id=doctor_id,
     ).first()
+
     if notification is None:
         return Response(
             {"detail": "알림을 찾을 수 없습니다."},
             status=status.HTTP_404_NOT_FOUND,
         )
-    notification.is_read = True
-    notification.save(update_fields=["is_read"])
-    return Response(NotificationSerializer(notification).data)
 
+    if not notification.is_read:
+        notification.is_read = True
+        notification.save(
+            update_fields=["is_read"],
+        )
+
+    return Response(
+        NotificationSerializer(notification).data,
+    )
 
 class EMRSignOffListCreateView(generics.ListCreateAPIView):
     queryset = EMRSignOff.objects.all().order_by("-created_at")
