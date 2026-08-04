@@ -33,6 +33,7 @@ async def analyze_image(
     file: UploadFile = File(...),
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.45,
+    always_show_gradcam: bool = True,
 ) -> dict[str, object]:
     """
     업로드된 이미지 한 장에 대해 다음 분석을 수행한다.
@@ -86,7 +87,7 @@ async def analyze_image(
                 image=rgb_image,
                 target_class=None,
                 alpha=0.45,
-                always_show=False,
+                always_show=always_show_gradcam,
             )
         )
 
