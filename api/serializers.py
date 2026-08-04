@@ -1,5 +1,7 @@
 from rest_framework import serializers
 from api.models import Doctor, Patient, Examination, AIResult, Bookmark, Consultation, Notification, EMRSignOff
+from api.models import ChatRoom, ChatMessage
+from api.models import Memo
 
 import os
 from django.conf import settings
@@ -269,6 +271,11 @@ class ConsultationSerializer(serializers.ModelSerializer):
             "reference_types",
             "exam_id",
             "status",
+            "is_read",
+            "read_at",
+            "reviewed_at",
+            "response_memo",
+            "completed_at",
             "created_at",
             "updated_at",
         ]
@@ -352,7 +359,10 @@ class NotificationSerializer(serializers.ModelSerializer):
             "title",
             "message",
             "consultation_id",
+            "chat_room_id",
+            "chat_message_id",
             "is_read",
+            "read_at",
             "created_at",
         ]
         read_only_fields = fields
@@ -402,3 +412,491 @@ class KakaoSignupSerializer(serializers.Serializer):
     phone = serializers.CharField()
     birthDate = serializers.CharField()
     name = serializers.CharField()
+
+
+class ConsultationReadSerializer(serializers.Serializer):
+    is_read = serializers.BooleanField(
+        required=False,
+        default=True,
+    )
+
+
+class ConsultationResponseSerializer(serializers.Serializer):
+    response_memo = serializers.CharField(
+        allow_blank=False,
+        trim_whitespace=True,
+    )
+
+    def validate_response_memo(self, value):
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                "협진 소견을 입력해주세요."
+            )
+
+        return value
+
+
+class ChatRoomCreateSerializer(serializers.Serializer):
+    doctor_id = serializers.CharField(max_length=20)
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+
+        if "doctorId" in data and "doctor_id" not in data:
+            data["doctor_id"] = data.get("doctorId")
+
+        return super().to_internal_value(data)
+
+
+class ChatMessageCreateSerializer(serializers.Serializer):
+    message_type = serializers.ChoiceField(
+        choices=ChatMessage.MessageType.choices,
+        required=False,
+        default=ChatMessage.MessageType.TEXT,
+    )
+    content = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    patient_id = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        default=None,
+    )
+    exam_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    ai_result_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    consultation_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+
+        camel_case_fields = {
+            "messageType": "message_type",
+            "patientId": "patient_id",
+            "examId": "exam_id",
+            "aiResultId": "ai_result_id",
+            "consultationId": "consultation_id",
+        }
+
+        for camel_case, snake_case in camel_case_fields.items():
+            if camel_case in data and snake_case not in data:
+                data[snake_case] = data.get(camel_case)
+
+        return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        message_type = attrs.get(
+            "message_type",
+            ChatMessage.MessageType.TEXT,
+        )
+        content = (attrs.get("content") or "").strip()
+        patient_id = attrs.get("patient_id")
+        exam_id = attrs.get("exam_id")
+        ai_result_id = attrs.get("ai_result_id")
+        consultation_id = attrs.get("consultation_id")
+
+        if (
+            message_type == ChatMessage.MessageType.TEXT
+            and not content
+        ):
+            raise serializers.ValidationError({
+                "content": "메시지를 입력해주세요."
+            })
+
+        if (
+            message_type
+            in [
+                ChatMessage.MessageType.PATIENT,
+                ChatMessage.MessageType.EXAMINATION,
+                ChatMessage.MessageType.AI_RESULT,
+            ]
+            and not patient_id
+        ):
+            raise serializers.ValidationError({
+                "patient_id": (
+                    "환자 자료 공유에는 "
+                    "patient_id가 필요합니다."
+                )
+            })
+
+        if (
+            message_type
+            == ChatMessage.MessageType.EXAMINATION
+            and exam_id is None
+        ):
+            raise serializers.ValidationError({
+                "exam_id": (
+                    "검사 자료 공유에는 "
+                    "exam_id가 필요합니다."
+                )
+            })
+
+        if (
+            message_type
+            == ChatMessage.MessageType.AI_RESULT
+            and ai_result_id is None
+            and exam_id is None
+        ):
+            raise serializers.ValidationError({
+                "ai_result_id": (
+                    "AI 분석 결과 공유에는 "
+                    "ai_result_id 또는 exam_id가 필요합니다."
+                )
+            })
+
+        if (
+            message_type
+            == ChatMessage.MessageType.CONSULTATION
+            and consultation_id is None
+        ):
+            raise serializers.ValidationError({
+                "consultation_id": (
+                    "협진 요청 공유에는 "
+                    "consultation_id가 필요합니다."
+                )
+            })
+
+        attrs["content"] = content
+        attrs["patient_id"] = patient_id or None
+
+        return attrs
+
+
+class ChatMessageResourceStatusSerializer(serializers.Serializer):
+    resource_status = serializers.ChoiceField(
+        choices=[
+            ChatMessage.ResourceStatus.CHECKED,
+            ChatMessage.ResourceStatus.ANSWERED,
+        ]
+    )
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField()
+    receiver_name = serializers.SerializerMethodField()
+    patient = serializers.SerializerMethodField()
+    examination = serializers.SerializerMethodField()
+    ai_result = serializers.SerializerMethodField()
+    consultation = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatMessage
+        fields = [
+            "id",
+            "room_id",
+            "sender_id",
+            "sender_name",
+            "receiver_id",
+            "receiver_name",
+            "message_type",
+            "content",
+            "patient_id",
+            "exam_id",
+            "ai_result_id",
+            "consultation_id",
+            "patient",
+            "examination",
+            "ai_result",
+            "consultation",
+            "is_read",
+            "read_at",
+            "resource_status",
+            "checked_at",
+            "answered_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_sender_name(self, obj):
+        doctor = Doctor.objects.filter(
+            doctor_id=obj.sender_id,
+        ).first()
+
+        return doctor.doctor_name if doctor else ""
+
+    def get_receiver_name(self, obj):
+        doctor = Doctor.objects.filter(
+            doctor_id=obj.receiver_id,
+        ).first()
+
+        return doctor.doctor_name if doctor else ""
+
+    def get_patient(self, obj):
+        if not obj.patient_id:
+            return None
+
+        patient = Patient.objects.filter(
+            patient_id=obj.patient_id,
+        ).first()
+
+        if patient is None:
+            return None
+
+        return PatientSerializer(
+            patient,
+            context=self.context,
+        ).data
+
+    def get_examination(self, obj):
+        if obj.exam_id is None:
+            return None
+
+        examination = Examination.objects.filter(
+            exam_id=obj.exam_id,
+        ).first()
+
+        if examination is None:
+            return None
+
+        return ExaminationSerializer(
+            examination,
+            context=self.context,
+        ).data
+
+    def get_ai_result(self, obj):
+        ai_result_id = (
+            obj.ai_result_id
+            if obj.ai_result_id is not None
+            else obj.exam_id
+        )
+
+        if ai_result_id is None:
+            return None
+
+        ai_result = AIResult.objects.filter(
+            exam_id=ai_result_id,
+        ).first()
+
+        if ai_result is None:
+            return None
+
+        return AIResultSerializer(
+            ai_result,
+            context=self.context,
+        ).data
+
+    def get_consultation(self, obj):
+        if obj.consultation_id is None:
+            return None
+
+        consultation = Consultation.objects.filter(
+            id=obj.consultation_id,
+        ).first()
+
+        if consultation is None:
+            return None
+
+        return ConsultationSerializer(
+            consultation,
+            context=self.context,
+        ).data
+
+
+class ChatRoomSerializer(serializers.ModelSerializer):
+    other_doctor = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatRoom
+        fields = [
+            "id",
+            "doctor1_id",
+            "doctor2_id",
+            "other_doctor",
+            "last_message",
+            "unread_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def _current_doctor_id(self):
+        request = self.context.get("request")
+
+        if request is None:
+            return None
+
+        return request.user.username
+
+    def get_other_doctor(self, obj):
+        current_doctor_id = self._current_doctor_id()
+
+        if not current_doctor_id:
+            return None
+
+        other_doctor_id = obj.get_other_doctor_id(
+            current_doctor_id
+        )
+
+        if not other_doctor_id:
+            return None
+
+        doctor = Doctor.objects.filter(
+            doctor_id=other_doctor_id,
+        ).first()
+
+        if doctor is None:
+            return None
+
+        return DoctorSerializer(doctor).data
+
+    def get_last_message(self, obj):
+        message = obj.messages.order_by(
+            "-created_at"
+        ).first()
+
+        if message is None:
+            return None
+
+        return ChatMessageSerializer(
+            message,
+            context=self.context,
+        ).data
+
+    def get_unread_count(self, obj):
+        current_doctor_id = self._current_doctor_id()
+
+        if not current_doctor_id:
+            return 0
+
+        return obj.messages.filter(
+            receiver_id=current_doctor_id,
+            is_read=False,
+        ).count()
+
+
+class MemoSerializer(serializers.ModelSerializer):
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Memo
+        fields = [
+            "id",
+            "doctor_id",
+            "patient_id",
+            "exam_id",
+            "memo_type",
+            "title",
+            "content",
+            "audio_url",
+            "audio_duration_seconds",
+            "transcript",
+            "transcription_status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "doctor_id",
+            "audio_url",
+            "transcript",
+            "transcription_status",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_audio_url(self, obj):
+        request = self.context.get("request")
+
+        if request is None or not obj.audio_file:
+            return None
+
+        return request.build_absolute_uri(
+            f"/api/memos/{obj.id}/audio/"
+        )
+
+
+class MemoCreateUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Memo
+        fields = [
+            "patient_id",
+            "exam_id",
+            "memo_type",
+            "title",
+            "content",
+            "audio_file",
+            "audio_duration_seconds",
+        ]
+
+    def validate_audio_file(self, value):
+        if value is None:
+            return value
+
+        allowed_types = {
+            "audio/m4a",
+            "audio/x-m4a",
+            "audio/mp4",
+            "audio/mpeg",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/aac",
+            "audio/ogg",
+            "audio/webm",
+        }
+
+        if value.content_type not in allowed_types:
+            raise serializers.ValidationError(
+                "지원하지 않는 음성 파일 형식입니다."
+            )
+
+        if value.size > 20 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "음성 파일은 20MB 이하만 업로드할 수 있습니다."
+            )
+
+        return value
+
+    def validate(self, attrs):
+        memo_type = attrs.get(
+            "memo_type",
+            getattr(
+                self.instance,
+                "memo_type",
+                Memo.MemoType.TEXT,
+            ),
+        )
+        content = attrs.get(
+            "content",
+            getattr(self.instance, "content", ""),
+        )
+        audio_file = attrs.get(
+            "audio_file",
+            getattr(self.instance, "audio_file", None),
+        )
+
+        if (
+            memo_type == Memo.MemoType.TEXT
+            and not (content or "").strip()
+        ):
+            raise serializers.ValidationError({
+                "content": "메모 내용을 입력해주세요."
+            })
+
+        if (
+            memo_type == Memo.MemoType.VOICE
+            and not audio_file
+        ):
+            raise serializers.ValidationError({
+                "audio_file": "음성 파일을 첨부해주세요."
+            })
+
+        return attrs

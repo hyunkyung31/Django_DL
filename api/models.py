@@ -121,6 +121,13 @@ class Consultation(models.Model):
         default=Status.PENDING,
         db_index=True,
     )
+
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    response_memo = models.TextField(blank=True, default="")
+    completed_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -132,6 +139,197 @@ class Consultation(models.Model):
         return f"Consultation({self.id}, {self.patient_id} → {self.receiver_id})"
 
 
+class ChatRoom(models.Model):
+    """의사 두 명 사이의 1:1 채팅방."""
+
+    id = models.BigAutoField(primary_key=True)
+    doctor1_id = models.CharField(max_length=20, db_index=True)
+    doctor2_id = models.CharField(max_length=20, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_rooms"
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["doctor1_id", "doctor2_id"],
+                name="unique_doctor_chat_room",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    doctor1_id__lt=models.F("doctor2_id")
+                ),
+                name="chat_doctor_order_check",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.doctor1_id and self.doctor2_id:
+            doctor_ids = sorted([
+                self.doctor1_id,
+                self.doctor2_id,
+            ])
+            self.doctor1_id = doctor_ids[0]
+            self.doctor2_id = doctor_ids[1]
+
+        super().save(*args, **kwargs)
+
+    def has_doctor(self, doctor_id):
+        return doctor_id in [
+            self.doctor1_id,
+            self.doctor2_id,
+        ]
+
+    def get_other_doctor_id(self, doctor_id):
+        if doctor_id == self.doctor1_id:
+            return self.doctor2_id
+
+        if doctor_id == self.doctor2_id:
+            return self.doctor1_id
+
+        return None
+
+    def __str__(self):
+        return (
+            f"ChatRoom("
+            f"{self.id}, "
+            f"{self.doctor1_id}, "
+            f"{self.doctor2_id}"
+            f")"
+        )
+
+
+class ChatMessage(models.Model):
+    """채팅 메시지 및 환자 관련 공유 자료."""
+
+    class MessageType(models.TextChoices):
+        TEXT = "text", "텍스트"
+        PATIENT = "patient", "환자 자료"
+        EXAMINATION = "examination", "검사 자료"
+        AI_RESULT = "ai_result", "AI 분석 결과"
+        CONSULTATION = "consultation", "협진 요청"
+
+    class ResourceStatus(models.TextChoices):
+        UNREAD = "unread", "안 읽음"
+        CHECKED = "checked", "확인함"
+        ANSWERED = "answered", "답변 완료"
+
+    id = models.BigAutoField(primary_key=True)
+
+    room = models.ForeignKey(
+        ChatRoom,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+
+    sender_id = models.CharField(max_length=20, db_index=True)
+    receiver_id = models.CharField(max_length=20, db_index=True)
+
+    message_type = models.CharField(
+        max_length=20,
+        choices=MessageType.choices,
+        default=MessageType.TEXT,
+        db_index=True,
+    )
+    content = models.TextField(blank=True, default="")
+
+    patient_id = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    exam_id = models.IntegerField(null=True, blank=True)
+    ai_result_id = models.IntegerField(null=True, blank=True)
+    consultation_id = models.BigIntegerField(null=True, blank=True)
+
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    resource_status = models.CharField(
+        max_length=20,
+        choices=ResourceStatus.choices,
+        default=ResourceStatus.UNREAD,
+    )
+    checked_at = models.DateTimeField(null=True, blank=True)
+    answered_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_messages"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(
+                fields=["room", "created_at"],
+                name="chat_message_room_idx",
+            ),
+            models.Index(
+                fields=["receiver_id", "is_read"],
+                name="chat_receiver_read_idx",
+            ),
+        ]
+
+    @property
+    def has_shared_resource(self):
+        return self.message_type != self.MessageType.TEXT
+
+    def __str__(self):
+        return (
+            f"ChatMessage("
+            f"{self.id}, "
+            f"{self.sender_id} → "
+            f"{self.receiver_id}"
+            f")"
+        )
+
+
+class Memo(models.Model):
+    class MemoType(models.TextChoices):
+        TEXT = "text", "텍스트"
+        VOICE = "voice", "음성"
+
+    class TranscriptionStatus(models.TextChoices):
+        NONE = "none", "없음"
+        PROCESSING = "processing", "처리중"
+        COMPLETED = "completed", "완료"
+        FAILED = "failed", "실패"
+
+    id = models.BigAutoField(primary_key=True)
+    doctor_id = models.CharField(max_length=20, db_index=True)
+    patient_id = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    exam_id = models.IntegerField(null=True, blank=True)
+    memo_type = models.CharField(
+        max_length=20,
+        choices=MemoType.choices,
+        default=MemoType.TEXT,
+    )
+    title = models.CharField(max_length=200, blank=True, default="")
+    content = models.TextField(blank=True, default="")
+    audio_file = models.FileField(
+        upload_to="memos/audio/%Y/%m/%d/",
+        null=True,
+        blank=True,
+    )
+    audio_duration_seconds = models.PositiveIntegerField(null=True, blank=True)
+    transcript = models.TextField(blank=True, default="")
+    transcription_status = models.CharField(
+        max_length=20,
+        choices=TranscriptionStatus.choices,
+        default=TranscriptionStatus.NONE,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "memos"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Memo({self.id}, {self.doctor_id})"
+
+
 class Notification(models.Model):
     id = models.BigAutoField(primary_key=True)
     recipient_doctor_id = models.CharField(max_length=20, db_index=True)
@@ -139,7 +337,12 @@ class Notification(models.Model):
     title = models.CharField(max_length=200)
     message = models.TextField()
     consultation_id = models.CharField(max_length=50, null=True, blank=True)
+
+    chat_room_id = models.BigIntegerField(null=True, blank=True)
+    chat_message_id = models.BigIntegerField(null=True, blank=True)
+
     is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

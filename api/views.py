@@ -25,6 +25,9 @@ from api.models import (
     Notification,
     EMRSignOff,
     PatientAuth,
+    ChatRoom,
+    ChatMessage,
+    Memo,
 )
 from api.ai_persist import AiPersistError, run_and_persist_exam_ai
 from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
@@ -47,6 +50,15 @@ from api.serializers import (
     KakaoLoginSerializer,
     KakaoLoginResponseSerializer,
     KakaoSignupSerializer,
+    ConsultationReadSerializer,
+    ConsultationResponseSerializer,
+    ChatRoomCreateSerializer,
+    ChatRoomSerializer,
+    ChatMessageCreateSerializer,
+    ChatMessageSerializer,
+    ChatMessageResourceStatusSerializer,
+    MemoSerializer,
+    MemoCreateUpdateSerializer,
 )
 
 from django.utils import timezone
@@ -1097,13 +1109,321 @@ def notification_mark_read(
 
     if not notification.is_read:
         notification.is_read = True
+        notification.read_at = timezone.now()
         notification.save(
-            update_fields=["is_read"],
+            update_fields=["is_read", "read_at"],
         )
 
     return Response(
         NotificationSerializer(notification).data,
     )
+
+@extend_schema(request=ConsultationReadSerializer, responses={200: ConsultationSerializer}, tags=["consultations"])
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def consultation_mark_read(request, consultation_id):
+    doctor_id = request.user.username
+    consultation = Consultation.objects.filter(id=consultation_id).first()
+    if consultation is None:
+        return Response({"detail": "협진 요청을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if consultation.receiver_id != doctor_id:
+        return Response({"detail": "협진 요청을 받은 의료진만 읽음 처리할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
+    serializer = ConsultationReadSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    consultation.is_read = serializer.validated_data["is_read"]
+    consultation.read_at = timezone.now() if consultation.is_read else None
+    consultation.save(update_fields=["is_read", "read_at", "updated_at"])
+    return Response(ConsultationSerializer(consultation, context={"request": request}).data)
+
+
+@extend_schema(request=ConsultationResponseSerializer, responses={200: ConsultationSerializer}, tags=["consultations"])
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def consultation_complete(request, consultation_id):
+    doctor_id = request.user.username
+    with transaction.atomic():
+        consultation = Consultation.objects.select_for_update().filter(id=consultation_id).first()
+        if consultation is None:
+            return Response({"detail": "협진 요청을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+        if consultation.receiver_id != doctor_id:
+            return Response({"detail": "협진 요청을 받은 의료진만 소견을 작성할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
+        if consultation.status not in {Consultation.Status.IN_PROGRESS, Consultation.Status.ACCEPTED}:
+            return Response({"detail": "검토중 또는 수락된 협진만 답변 완료할 수 있습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = ConsultationResponseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        now = timezone.now()
+        consultation.response_memo = serializer.validated_data["response_memo"]
+        consultation.status = Consultation.Status.COMPLETED
+        consultation.completed_at = now
+        consultation.is_read = True
+        consultation.read_at = consultation.read_at or now
+        consultation.reviewed_at = consultation.reviewed_at or now
+        consultation.save(update_fields=["response_memo", "status", "completed_at", "is_read", "read_at", "reviewed_at", "updated_at"])
+        Notification.objects.create(
+            recipient_doctor_id=consultation.requester_id,
+            notification_type="consultation_completed",
+            title="협진 소견이 도착했습니다.",
+            message=f"{consultation.patient_id} 환자의 협진 소견 작성이 완료되었습니다.",
+            consultation_id=str(consultation.id),
+            is_read=False,
+        )
+    return Response(ConsultationSerializer(consultation, context={"request": request}).data)
+
+
+@extend_schema(methods=["GET"], responses={200: ChatRoomSerializer(many=True)}, tags=["chat"])
+@extend_schema(methods=["POST"], request=ChatRoomCreateSerializer, responses={201: ChatRoomSerializer}, tags=["chat"])
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def chat_room_list_create(request):
+    doctor_id = request.user.username
+    if request.method == "GET":
+        queryset = ChatRoom.objects.filter(Q(doctor1_id=doctor_id) | Q(doctor2_id=doctor_id)).order_by("-updated_at")
+        serializer = ChatRoomSerializer(queryset, many=True, context={"request": request})
+        return Response({"count": queryset.count(), "results": serializer.data})
+    serializer = ChatRoomCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    other_doctor_id = serializer.validated_data["doctor_id"]
+    if other_doctor_id == doctor_id:
+        return Response({"detail": "본인과 채팅방을 만들 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+    if not Doctor.objects.filter(doctor_id=other_doctor_id).exists():
+        return Response({"detail": "의사를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    doctor_ids = sorted([doctor_id, other_doctor_id])
+    room, created = ChatRoom.objects.get_or_create(doctor1_id=doctor_ids[0], doctor2_id=doctor_ids[1])
+    return Response(
+        ChatRoomSerializer(room, context={"request": request}).data,
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@extend_schema(methods=["GET"], responses={200: ChatMessageSerializer(many=True)}, tags=["chat"])
+@extend_schema(methods=["POST"], request=ChatMessageCreateSerializer, responses={201: ChatMessageSerializer}, tags=["chat"])
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def chat_message_list_create(request, room_id):
+    doctor_id = request.user.username
+    room = ChatRoom.objects.filter(id=room_id).first()
+    if room is None:
+        return Response({"detail": "채팅방을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if not room.has_doctor(doctor_id):
+        return Response({"detail": "이 채팅방에 접근할 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+    if request.method == "GET":
+        queryset = room.messages.order_by("created_at")
+        serializer = ChatMessageSerializer(queryset, many=True, context={"request": request})
+        return Response({"room_id": room.id, "count": queryset.count(), "results": serializer.data})
+    serializer = ChatMessageCreateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    data = serializer.validated_data
+    patient_id = data.get("patient_id")
+    exam_id = data.get("exam_id")
+    ai_result_id = data.get("ai_result_id")
+    consultation_id = data.get("consultation_id")
+    if patient_id and not Patient.objects.filter(patient_id=patient_id).exists():
+        return Response({"detail": "공유할 환자를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    examination = Examination.objects.filter(exam_id=exam_id).first() if exam_id is not None else None
+    if exam_id is not None and examination is None:
+        return Response({"detail": "공유할 검사 자료를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if examination is not None and patient_id and examination.patient_id != patient_id:
+        return Response({"detail": "선택한 환자와 검사 자료가 일치하지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
+    if data["message_type"] == ChatMessage.MessageType.AI_RESULT:
+        lookup_id = ai_result_id if ai_result_id is not None else exam_id
+        if not AIResult.objects.filter(exam_id=lookup_id).exists():
+            return Response({"detail": "공유할 AI 분석 결과를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if consultation_id is not None:
+        consultation = Consultation.objects.filter(id=consultation_id).first()
+        if consultation is None:
+            return Response({"detail": "공유할 협진 요청을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+        if doctor_id not in {consultation.requester_id, consultation.receiver_id}:
+            return Response({"detail": "이 협진 요청을 공유할 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+    receiver_id = room.get_other_doctor_id(doctor_id)
+    with transaction.atomic():
+        message = ChatMessage.objects.create(
+            room=room,
+            sender_id=doctor_id,
+            receiver_id=receiver_id,
+            message_type=data["message_type"],
+            content=data.get("content") or "",
+            patient_id=patient_id,
+            exam_id=exam_id,
+            ai_result_id=ai_result_id,
+            consultation_id=consultation_id,
+            is_read=False,
+            resource_status=ChatMessage.ResourceStatus.UNREAD,
+        )
+        room.updated_at = timezone.now()
+        room.save(update_fields=["updated_at"])
+        is_text = message.message_type == ChatMessage.MessageType.TEXT
+        Notification.objects.create(
+            recipient_doctor_id=receiver_id,
+            notification_type="chat_message" if is_text else "shared_resource",
+            title="새 채팅 메시지" if is_text else "새 공유 자료",
+            message=message.content or "새로운 자료가 공유되었습니다.",
+            chat_room_id=room.id,
+            chat_message_id=message.id,
+            is_read=False,
+        )
+    return Response(ChatMessageSerializer(message, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(tags=["chat"])
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def chat_room_mark_read(request, room_id):
+    doctor_id = request.user.username
+    room = ChatRoom.objects.filter(id=room_id).first()
+    if room is None:
+        return Response({"detail": "채팅방을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if not room.has_doctor(doctor_id):
+        return Response({"detail": "이 채팅방에 접근할 권한이 없습니다."}, status=status.HTTP_403_FORBIDDEN)
+    now = timezone.now()
+    updated_count = ChatMessage.objects.filter(room=room, receiver_id=doctor_id, is_read=False).update(is_read=True, read_at=now)
+    Notification.objects.filter(recipient_doctor_id=doctor_id, chat_room_id=room.id, is_read=False).update(is_read=True, read_at=now)
+    return Response({"room_id": room.id, "updated_count": updated_count, "read_at": now})
+
+
+@extend_schema(request=ChatMessageResourceStatusSerializer, responses={200: ChatMessageSerializer}, tags=["chat"])
+@api_view(["PATCH"])
+@permission_classes([IsAuthenticated])
+def chat_message_resource_status(request, message_id):
+    doctor_id = request.user.username
+    with transaction.atomic():
+        message = ChatMessage.objects.select_for_update().filter(id=message_id).first()
+        if message is None:
+            return Response({"detail": "메시지를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+        if message.receiver_id != doctor_id:
+            return Response({"detail": "공유 자료를 받은 의료진만 상태를 변경할 수 있습니다."}, status=status.HTTP_403_FORBIDDEN)
+        if not message.has_shared_resource:
+            return Response({"detail": "일반 텍스트 메시지에는 자료 상태가 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = ChatMessageResourceStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["resource_status"]
+        if message.resource_status == ChatMessage.ResourceStatus.ANSWERED:
+            return Response({"detail": "답변 완료된 자료 상태는 변경할 수 없습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        now = timezone.now()
+        message.resource_status = new_status
+        message.is_read = True
+        message.read_at = message.read_at or now
+        if new_status == ChatMessage.ResourceStatus.CHECKED:
+            message.checked_at = now
+        if new_status == ChatMessage.ResourceStatus.ANSWERED:
+            message.checked_at = message.checked_at or now
+            message.answered_at = now
+        message.save(update_fields=["resource_status", "is_read", "read_at", "checked_at", "answered_at"])
+    return Response(ChatMessageSerializer(message, context={"request": request}).data)
+
+
+@extend_schema(methods=["GET"], responses={200: MemoSerializer(many=True)}, tags=["memos"])
+@extend_schema(methods=["POST"], request=MemoCreateUpdateSerializer, responses={201: MemoSerializer}, tags=["memos"])
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def memo_list_create(request):
+    doctor_id = request.user.username
+    if request.method == "GET":
+        queryset = Memo.objects.filter(doctor_id=doctor_id)
+        patient_id = (request.query_params.get("patient_id") or "").strip()
+        exam_id = (request.query_params.get("exam_id") or "").strip()
+        memo_type = (request.query_params.get("memo_type") or "").strip()
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+        if exam_id:
+            try:
+                queryset = queryset.filter(exam_id=int(exam_id))
+            except ValueError:
+                return Response({"detail": "exam_id가 올바르지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
+        if memo_type:
+            if memo_type not in Memo.MemoType.values:
+                return Response({"detail": "memo_type이 올바르지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
+            queryset = queryset.filter(memo_type=memo_type)
+        serializer = MemoSerializer(queryset, many=True, context={"request": request})
+        return Response({"count": queryset.count(), "results": serializer.data})
+    serializer = MemoCreateUpdateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    patient_id = serializer.validated_data.get("patient_id")
+    exam_id = serializer.validated_data.get("exam_id")
+    error_response = _validate_memo_relations(patient_id, exam_id)
+    if error_response:
+        return error_response
+    memo = serializer.save(doctor_id=doctor_id)
+    return Response(MemoSerializer(memo, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(request=MemoCreateUpdateSerializer, responses={200: MemoSerializer}, tags=["memos"])
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def memo_detail(request, memo_id):
+    doctor_id = request.user.username
+    memo = Memo.objects.filter(id=memo_id, doctor_id=doctor_id).first()
+    if memo is None:
+        return Response({"detail": "메모를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
+        return Response(MemoSerializer(memo, context={"request": request}).data)
+    if request.method == "DELETE":
+        if memo.audio_file:
+            memo.audio_file.delete(save=False)
+        memo.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    serializer = MemoCreateUpdateSerializer(memo, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    patient_id = serializer.validated_data.get("patient_id", memo.patient_id)
+    exam_id = serializer.validated_data.get("exam_id", memo.exam_id)
+    error_response = _validate_memo_relations(patient_id, exam_id)
+    if error_response:
+        return error_response
+    old_audio_name = memo.audio_file.name if memo.audio_file else None
+    memo = serializer.save()
+    if old_audio_name and "audio_file" in serializer.validated_data and old_audio_name != memo.audio_file.name:
+        memo.audio_file.storage.delete(old_audio_name)
+    return Response(MemoSerializer(memo, context={"request": request}).data)
+
+
+@extend_schema(request=MemoCreateUpdateSerializer, responses={201: MemoSerializer}, tags=["memos"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def voice_memo_create(request):
+    data = request.data.copy()
+    data["memo_type"] = Memo.MemoType.VOICE
+    serializer = MemoCreateUpdateSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+    patient_id = serializer.validated_data.get("patient_id")
+    exam_id = serializer.validated_data.get("exam_id")
+    error_response = _validate_memo_relations(patient_id, exam_id)
+    if error_response:
+        return error_response
+    memo = serializer.save(doctor_id=request.user.username, memo_type=Memo.MemoType.VOICE)
+    return Response(MemoSerializer(memo, context={"request": request}).data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(tags=["memos"])
+@api_view(["GET", "DELETE"])
+@permission_classes([IsAuthenticated])
+def memo_audio(request, memo_id):
+    memo = Memo.objects.filter(id=memo_id, doctor_id=request.user.username).first()
+    if memo is None:
+        return Response({"detail": "메모를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if not memo.audio_file:
+        return Response({"detail": "음성 파일이 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "DELETE":
+        memo.audio_file.delete(save=False)
+        memo.audio_file = None
+        memo.audio_duration_seconds = None
+        memo.save(update_fields=["audio_file", "audio_duration_seconds", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    try:
+        return FileResponse(memo.audio_file.open("rb"), content_type="application/octet-stream")
+    except FileNotFoundError:
+        return Response({"detail": "음성 파일을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+
+
+def _validate_memo_relations(patient_id, exam_id):
+    if patient_id and not Patient.objects.filter(patient_id=patient_id).exists():
+        return Response({"detail": "환자를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+    if exam_id is not None:
+        examination = Examination.objects.filter(exam_id=exam_id).first()
+        if examination is None:
+            return Response({"detail": "검사 기록을 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
+        if patient_id and examination.patient_id != patient_id:
+            return Response({"detail": "환자와 검사 기록이 일치하지 않습니다."}, status=status.HTTP_400_BAD_REQUEST)
+    return None
+
 
 class EMRSignOffListCreateView(generics.ListCreateAPIView):
     queryset = EMRSignOff.objects.all().order_by("-created_at")
