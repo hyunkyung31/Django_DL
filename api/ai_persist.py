@@ -30,6 +30,7 @@ def _call_analysis_image(
     content_type: str,
     confidence_threshold: float = 0.25,
     iou_threshold: float = 0.45,
+    always_show_gradcam: bool = True,
 ) -> dict[str, Any]:
     url = f"{settings.AI_SERVER_URL.rstrip('/')}/analysis/image"
     files = {
@@ -38,6 +39,7 @@ def _call_analysis_image(
     params = {
         "confidence_threshold": confidence_threshold,
         "iou_threshold": iou_threshold,
+        "always_show_gradcam": str(always_show_gradcam).lower(),
     }
 
     try:
@@ -158,6 +160,11 @@ def run_and_persist_exam_ai(
             content=overlay_png,
             content_type="image/png",
         )
+    else:
+        logger.warning(
+            "exam_id=%s Grad-CAM overlay가 없어 heatmap 파일을 저장하지 못했습니다.",
+            exam.exam_id,
+        )
 
     ai = AIResult.objects.filter(exam_id=exam.exam_id).first()
     if ai is None:
@@ -167,8 +174,7 @@ def run_and_persist_exam_ai(
     ai.severity_class = severity_class
     ai.confidence_score = confidence
     ai.ai_bbox_data = ai_bbox_data
-    if gradcam_path:
-        ai.gradcam_path = gradcam_path
+    ai.gradcam_path = gradcam_path
     ai.is_confirmed = False
     ai.save()
 
@@ -182,6 +188,7 @@ def run_and_persist_exam_ai(
         "ai_bbox_data": ai.ai_bbox_data,
         "gradcam_path": ai.gradcam_path,
         "show_gradcam": bool(classification.get("show_gradcam")),
+        "heatmap_saved": bool(gradcam_path),
         "probabilities": classification.get("probabilities"),
         "analysis_id": payload.get("analysis_id"),
     }
