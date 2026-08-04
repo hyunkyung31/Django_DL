@@ -100,9 +100,13 @@ class Consultation(models.Model):
 
     id = models.BigAutoField(primary_key=True)
     patient_id = models.CharField(max_length=50)
-    requester_id = models.CharField(max_length=20)
+    requester_id = models.CharField(max_length=20, db_index=True)
     receiver_id = models.CharField(max_length=20, db_index=True)
     reason = models.TextField()
+    priority = models.CharField(max_length=20, default="normal")
+    memo = models.TextField(blank=True, default="")
+    reference_types = models.JSONField(default=list, blank=True)
+    exam_id = models.CharField(max_length=50, null=True, blank=True)
     status = models.CharField(max_length=20, default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
 
