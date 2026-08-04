@@ -26,6 +26,7 @@ from api.models import (
     EMRSignOff,
     PatientAuth,
 )
+from api.ai_persist import AiPersistError, run_and_persist_exam_ai
 from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
 from api.serializers import (
     LoginSerializer,
@@ -561,6 +562,45 @@ def ai_image_analyze(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     return _forward_to_ai("/analysis/image", uploaded)
+
+@extend_schema(tags=["ai"])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def exam_ai_run_and_persist(request, exam_id: int):
+    """
+    exam keyframe으로 best 모델 추론 후 결과를 영구 저장한다.
+
+    - bbox → ai_results.ai_bbox_data (JSON)
+    - Grad-CAM overlay → GCS/local patients/{id}/gradcam/ + ai_results.gradcam_path
+    - 분류 결과 → has_lesion / severity_class / confidence_score
+    """
+    def _float_param(name: str, default: float) -> float:
+        raw = request.data.get(name, request.query_params.get(name, default))
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
+    confidence_threshold = _float_param("confidence_threshold", 0.25)
+    iou_threshold = _float_param("iou_threshold", 0.45)
+
+    if not 0.0 <= confidence_threshold <= 1.0 or not 0.0 <= iou_threshold <= 1.0:
+        return Response(
+            {"detail": "confidence_threshold / iou_threshold는 0~1 범위여야 합니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        result = run_and_persist_exam_ai(
+            exam_id=exam_id,
+            confidence_threshold=confidence_threshold,
+            iou_threshold=iou_threshold,
+        )
+    except AiPersistError as exc:
+        return Response({"detail": exc.message}, status=exc.status_code)
+
+    result["gradcam_url"] = build_media_url(request, result.get("gradcam_path"))
+    return Response(result, status=status.HTTP_200_OK)
 
 
 @api_view(["GET", "POST"])

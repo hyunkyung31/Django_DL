@@ -23,6 +23,7 @@ from api.views import (
     EMRSignOffDetailView,
     kakao_login,
     kakao_signup,
+    exam_ai_run_and_persist,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -65,4 +66,5 @@ urlpatterns = [
     path("api/ai/gradcam/", ai_gradcam),
     path("api/ai/image-analyze/", ai_image_analyze),
     path("api/media/gcs/", media_gcs),
+    path("api/exams/<int:exam_id>/ai/run/", exam_ai_run_and_persist),
 ]
