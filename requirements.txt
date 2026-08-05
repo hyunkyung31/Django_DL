@@ -24,4 +24,4 @@ requests==2.32.4
 # Media / GCS (GCS_MEDIA_BUCKET 설정 시에만 실질 사용)
 google-cloud-storage==3.1.0
 
-requests
+reportlab==5.0.0
