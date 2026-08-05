@@ -46,6 +46,8 @@ from api.views import (
 from api.gpt_views import (
     GPTTestView,
     ChatAPIView,
+    chatbot_session_list,
+    chatbot_session_detail,
 )
 
 from rest_framework_simplejwt.views import(
@@ -125,4 +127,9 @@ urlpatterns = [
     path("api/exams/<int:exam_id>/ai/run/", exam_ai_run_and_persist),
     path("gpt-test/", GPTTestView.as_view()),
     path("chat/", ChatAPIView.as_view()),
+    path("api/chatbot/sessions/", chatbot_session_list),
+    path(
+        "api/chatbot/sessions/<int:session_id>/",
+        chatbot_session_detail,
+    ),
 ]
