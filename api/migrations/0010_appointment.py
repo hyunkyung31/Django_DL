@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0008_chat_memo_consultation_fields"),
+        ("api", "0009_emrsignoff_report_generated_at_and_more"),
     ]
 
     operations = [
