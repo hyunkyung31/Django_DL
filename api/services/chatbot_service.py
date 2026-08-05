@@ -54,10 +54,12 @@ def chat(
 
         print(intent_result)
 
-        # 2. Risk (current message only)
+        # 2. Risk — rules only (skip extra GPT round-trip)
         print("2. Risk")
 
-        risk_result = analyze_risk(message)
+        # Symptom-like intents can still use rule-based emergency scoring.
+        # GPT risk backup is off to stay under Flutter's 60s Dio timeout.
+        risk_result = analyze_risk(message, use_gpt=False)
 
         print(risk_result)
 
@@ -104,6 +106,7 @@ def chat(
             session_id=session.id,
             system_prompt=SYSTEM_PROMPT,
             current_prompt=current_prompt,
+            limit=4,
         )
 
         print("History OK")

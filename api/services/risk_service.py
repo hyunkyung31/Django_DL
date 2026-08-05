@@ -19,7 +19,7 @@ from api.services.risk_gpt import detect_risk_gpt
 from api.utils.gpt_parse import safe_risk_level, safe_confidence
 
 
-def analyze_risk(message: str):
+def analyze_risk(message: str, use_gpt: bool = False):
 
     message_lower = message.lower()
 
@@ -288,7 +288,9 @@ def analyze_risk(message: str):
 
     source = "rule"
 
-    if confidence < 0.6 or score < 20:
+    # GPT risk backup is optional — disabled by default for latency.
+    # Emergency/high-risk keywords above still apply via rules.
+    if use_gpt and (confidence < 0.6 or score < 20):
         try:
             gpt_result = detect_risk_gpt(message)
 

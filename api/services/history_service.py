@@ -12,7 +12,7 @@ from api.services.conversation_service import (
 )
 
 
-DEFAULT_HISTORY_LIMIT = 10
+DEFAULT_HISTORY_LIMIT = 4
 
 
 def get_messages(
