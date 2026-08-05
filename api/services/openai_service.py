@@ -13,7 +13,9 @@ def get_client() -> OpenAI:
             raise RuntimeError(
                 "OPENAI_API_KEY (or OPEN_API_KEY) is not configured in settings/.env"
             )
-        _client = OpenAI(api_key=api_key)
+        # Keep per-request timeouts modest so gunicorn workers are less likely
+        # to hit the default 30s hard kill and return HTML 500 to Flutter.
+        _client = OpenAI(api_key=api_key, timeout=25.0, max_retries=1)
     return _client
 
 
@@ -30,5 +32,7 @@ def ask_gpt(messages):
     response = get_client().chat.completions.create(
         model="gpt-5-nano",
         messages=messages,
+        timeout=25,
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    return (content or "").strip()

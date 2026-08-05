@@ -154,9 +154,12 @@ INTENT_KEYWORDS = {
 
     "medicine": {
 
-        "약": 3,
+        # NOTE: bare "약" removed — it false-positives inside "예약"
         "복용": 4,
-        "먹어": 3,
+        "약 복용": 6,
+        "약먹": 5,
+        "약 먹": 5,
+        "처방": 5,
         "아스피린": 7,
         "스타틴": 7,
         "혈압약": 7,

@@ -1,6 +1,9 @@
-import json
-
 from api.services.openai_service import client
+from api.utils.gpt_parse import (
+    parse_json_content,
+    safe_confidence,
+    safe_risk_level,
+)
 
 
 def detect_risk_gpt(message: str):
@@ -35,24 +38,27 @@ def detect_risk_gpt(message: str):
         messages=[
             {
                 "role": "system",
-                "content": "당신은 심혈관 응급도 분류 AI입니다."
+                "content": "당신은 심혈관 응급도 분류 AI입니다. JSON만 반환하세요.",
             },
             {
                 "role": "user",
-                "content": prompt
-            }
+                "content": prompt,
+            },
         ],
+        timeout=20,
     )
 
-    content = response.choices[0].message.content.strip()
-
-    try:
-        return json.loads(content)
-
-    except Exception:
-
-        return {
+    content = (response.choices[0].message.content or "").strip()
+    parsed = parse_json_content(
+        content,
+        default={
             "risk_level": 0,
             "confidence": 0.0,
-            "reason": "GPT Parsing Error"
-        }
+            "reason": "GPT Parsing Error",
+        },
+    )
+    return {
+        "risk_level": safe_risk_level(parsed.get("risk_level"), fallback=0),
+        "confidence": safe_confidence(parsed.get("confidence"), fallback=0.0),
+        "reason": str(parsed.get("reason") or ""),
+    }

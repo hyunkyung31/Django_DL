@@ -16,6 +16,7 @@ from api.rules.risk_level import RISK_LEVEL
 from api.rules.risk_weights import RISK_WEIGHTS
 
 from api.services.risk_gpt import detect_risk_gpt
+from api.utils.gpt_parse import safe_risk_level, safe_confidence
 
 
 def analyze_risk(message: str):
@@ -288,16 +289,21 @@ def analyze_risk(message: str):
     source = "rule"
 
     if confidence < 0.6 or score < 20:
+        try:
+            gpt_result = detect_risk_gpt(message)
 
-        gpt_result = detect_risk_gpt(message)
-
-        risk_level = gpt_result["risk_level"]
-
-        confidence = gpt_result["confidence"]
-
-        risk_message = gpt_result.get("reason", risk_message)
-
-        source = "gpt"
+            risk_level = safe_risk_level(
+                gpt_result.get("risk_level"),
+                fallback=risk_level,
+            )
+            confidence = safe_confidence(
+                gpt_result.get("confidence"),
+                fallback=confidence,
+            )
+            risk_message = gpt_result.get("reason", risk_message) or risk_message
+            source = "gpt"
+        except Exception:
+            source = "rule_gpt_failed"
 
     # ============================================
     # Return
@@ -305,7 +311,7 @@ def analyze_risk(message: str):
 
     return {
 
-        "risk_level": risk_level,
+        "risk_level": int(risk_level),
 
         "score": score,
 

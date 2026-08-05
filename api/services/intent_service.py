@@ -3,11 +3,26 @@ from collections import defaultdict
 from api.rules.intent_keywords import INTENT_KEYWORDS
 from api.rules.intent_rules import INTENT_RULES
 from api.services.intent_gpt import detect_intent_gpt
+from api.utils.keyword_match import keyword_in_text
+from api.utils.gpt_parse import safe_intent, safe_confidence
+
+
+ALLOWED_INTENTS = {
+    "symptom",
+    "report",
+    "medical_term",
+    "appointment",
+    "hospital",
+    "lifestyle",
+    "medicine",
+    "app",
+    "general",
+}
 
 
 def detect_intent(message: str):
 
-    message = message.lower()
+    message = (message or "").lower()
 
     scores = defaultdict(int)
 
@@ -23,7 +38,7 @@ def detect_intent(message: str):
 
         for keyword, score in keywords.items():
 
-            if keyword.lower() in message:
+            if keyword_in_text(keyword, message):
 
                 scores[intent] += score
                 matched_keywords[intent].append(keyword)
@@ -41,7 +56,7 @@ def detect_intent(message: str):
         if all_keywords:
 
             if not all(
-                keyword.lower() in message
+                keyword_in_text(keyword, message)
                 for keyword in all_keywords
             ):
                 continue
@@ -53,7 +68,7 @@ def detect_intent(message: str):
         if any_keywords:
 
             if not any(
-                keyword.lower() in message
+                keyword_in_text(keyword, message)
                 for keyword in any_keywords
             ):
                 continue
@@ -65,7 +80,7 @@ def detect_intent(message: str):
         if exclude_keywords:
 
             if any(
-                keyword.lower() in message
+                keyword_in_text(keyword, message)
                 for keyword in exclude_keywords
             ):
                 continue
@@ -139,14 +154,20 @@ def detect_intent(message: str):
     # 5. GPT Backup
     # =====================================================
 
-    if confidence < 0.6 or score_gap <= 2 or best_score < 8 :
-
-        gpt_result = detect_intent_gpt(message)
-
-        result["intent"] = gpt_result["intent"]
-
-        result["confidence"] = gpt_result["confidence"]
-
-        result["source"] = "gpt"
+    if confidence < 0.6 or score_gap <= 2 or best_score < 8:
+        try:
+            gpt_result = detect_intent_gpt(message)
+            result["intent"] = safe_intent(
+                gpt_result.get("intent"),
+                ALLOWED_INTENTS,
+                fallback=best_intent,
+            )
+            result["confidence"] = safe_confidence(
+                gpt_result.get("confidence"),
+                fallback=confidence,
+            )
+            result["source"] = "gpt"
+        except Exception:
+            result["source"] = "rule_gpt_failed"
 
     return result

@@ -1,6 +1,5 @@
-import json
-
 from api.services.openai_service import client
+from api.utils.gpt_parse import parse_json_content
 
 
 INTENT_LIST = [
@@ -12,7 +11,7 @@ INTENT_LIST = [
     "lifestyle",
     "medicine",
     "app",
-    "general"
+    "general",
 ]
 
 
@@ -41,23 +40,18 @@ def detect_intent_gpt(message: str):
         messages=[
             {
                 "role": "system",
-                "content": "당신은 Intent Classifier입니다."
+                "content": "당신은 Intent Classifier입니다. JSON만 반환하세요.",
             },
             {
                 "role": "user",
-                "content": prompt
-            }
+                "content": prompt,
+            },
         ],
+        timeout=20,
     )
 
-    content = response.choices[0].message.content.strip()
-
-    try:
-        return json.loads(content)
-
-    except Exception:
-
-        return {
-            "intent": "general",
-            "confidence": 0.0
-        }
+    content = (response.choices[0].message.content or "").strip()
+    return parse_json_content(
+        content,
+        default={"intent": "general", "confidence": 0.0},
+    )
