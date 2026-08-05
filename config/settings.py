@@ -9,6 +9,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # 1. .env 파일 불러오기
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
+# Patient AI chatbot (OpenAI). Prefer OPENAI_API_KEY; OPEN_API_KEY kept for compat.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_API_KEY")
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 

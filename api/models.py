@@ -467,3 +467,146 @@ class Appointment(models.Model):
             f"Appointment({self.id}, {self.patient_id} → "
             f"{self.doctor_id}, {self.status})"
         )
+
+# ============================================
+# AI Chatbot
+# ============================================
+
+class ChatSession(models.Model):
+    """환자와 AI 챗봇의 대화 세션"""
+
+    id = models.BigAutoField(primary_key=True)
+
+    patient_id = models.CharField(
+        max_length=50,
+        db_index=True,
+    )
+
+    title = models.CharField(
+        max_length=200,
+        default="새로운 상담",
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_sessions"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"ChatSession({self.id}, {self.patient_id})"
+
+
+class ChatHistory(models.Model):
+    """AI 챗봇 대화 기록"""
+
+    class Role(models.TextChoices):
+        USER = "user", "사용자"
+        ASSISTANT = "assistant", "AI"
+
+    class ReferenceType(models.TextChoices):
+        GENERAL = "general", "일반"
+        SYMPTOM = "symptom", "증상 상담"
+        REPORT = "report", "검사 결과"
+        MEDICAL = "medical", "의학 용어"
+        APPOINTMENT = "appointment", "예약"
+        LIFESTYLE = "lifestyle", "생활습관"
+
+    id = models.BigAutoField(primary_key=True)
+
+    session = models.ForeignKey(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        db_index=True,
+    )
+
+    content = models.TextField()
+
+    intent = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+    )
+
+    risk_level = models.IntegerField(default=0)
+
+    exam_id = models.IntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
+    ai_result_id = models.IntegerField(
+        null=True,
+        blank=True,
+    )
+
+    reference_type = models.CharField(
+        max_length=30,
+        choices=ReferenceType.choices,
+        default=ReferenceType.GENERAL,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_history"
+        ordering = ["created_at"]
+
+        indexes = [
+            models.Index(
+                fields=["session", "created_at"],
+                name="chat_history_session_idx",
+            ),
+            models.Index(
+                fields=["exam_id"],
+                name="chat_history_exam_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"ChatHistory("
+            f"{self.id}, "
+            f"{self.role}, "
+            f"session={self.session_id}"
+            f")"
+        )
+
+class ConversationMemory(models.Model):
+    """대화 요약 메모리"""
+
+    id = models.BigAutoField(primary_key=True)
+
+    session = models.OneToOneField(
+        ChatSession,
+        on_delete=models.CASCADE,
+        related_name="memory",
+        db_column="session_id",
+    )
+
+    summary = models.TextField(
+        null=True,
+        blank=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        db_table = "conversation_memory"
+        managed = False
+
+    def __str__(self):
+        return f"ConversationMemory(session={self.session_id})"
