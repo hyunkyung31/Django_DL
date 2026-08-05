@@ -384,6 +384,7 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    report_url = serializers.SerializerMethodField()
 
     class Meta:
         model = EMRSignOff
@@ -395,6 +396,9 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "finalized",
             "final_result",
             "ai_result",
+            "report_path",
+            "report_url",
+            "report_generated_at",
             "emr_transmitted",
             "transmitted_at",
             "report_ready",
@@ -405,6 +409,10 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "id",
             "doctor_id",
             "ai_result",
+            "report_ready",
+            "report_path",
+            "report_url",
+            "report_generated_at",
             "emr_transmitted",
             "transmitted_at",
             "report_ready",
@@ -489,10 +497,25 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
     def _build_ai_result_snapshot(self, exam_id):
         ai_result = AIResult.objects.get(exam_id=exam_id)
 
-        return AIResultSerializer(
+        serialized = AIResultSerializer(
             ai_result,
             context=self.context,
-        ).data
+            ).data
+        return dict(serialized)
+
+    def get_report_url(self, obj):
+        if not obj.report_path:
+            return None
+
+        request = self.context.get("request")
+
+        if request is None:
+            return obj.report_path
+
+        return build_media_url(
+            request,
+            obj.report_path,
+        )
 
 class KakaoLoginSerializer(serializers.Serializer) :
     accessToken = serializers.CharField()
