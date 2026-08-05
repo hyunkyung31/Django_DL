@@ -42,6 +42,12 @@ from api.views import (
     appointment_me,
     appointment_detail,
 )
+
+from api.gpt_views import (
+    GPTTestView,
+    ChatAPIView,
+)
+
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
     TokenRefreshView,
@@ -117,4 +123,6 @@ urlpatterns = [
     path("api/ai/image-analyze/", ai_image_analyze),
     path("api/media/gcs/", media_gcs),
     path("api/exams/<int:exam_id>/ai/run/", exam_ai_run_and_persist),
+    path("gpt-test/", GPTTestView.as_view()),
+    path("chat/", ChatAPIView.as_view()),
 ]

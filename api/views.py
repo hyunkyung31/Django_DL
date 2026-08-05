@@ -71,6 +71,8 @@ from api.serializers import (
     MemoSerializer,
     MemoCreateUpdateSerializer,
     AppointmentCreateSerializer,
+    AppointmentSerializer,
+    AppointmentUpdateSerializer,
 )
 
 from django.utils import timezone
