@@ -5,6 +5,7 @@ from api.models import Memo
 
 import os
 from django.conf import settings
+from django.urls import reverse
 from api.media_utils import build_media_url
 
 def _normalize_ecg_type(raw: str | None) -> str | None:
@@ -396,7 +397,6 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "finalized",
             "final_result",
             "ai_result",
-            "report_path",
             "report_url",
             "report_generated_at",
             "emr_transmitted",
@@ -409,8 +409,6 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "id",
             "doctor_id",
             "ai_result",
-            "report_ready",
-            "report_path",
             "report_url",
             "report_generated_at",
             "emr_transmitted",
@@ -503,19 +501,21 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             ).data
         return dict(serialized)
 
-    def get_report_url(self, obj):
-        if not obj.report_path:
+    def get_report_url(self, obj) -> str | None:
+        if not obj.report_ready or not obj.report_path:
             return None
 
         request = self.context.get("request")
 
         if request is None:
-            return obj.report_path
+            return None
 
-        return build_media_url(
-            request,
-            obj.report_path,
+        relative_url = reverse(
+            "emr-signoff-report",
+            kwargs={"pk": obj.pk},
         )
+
+        return request.build_absolute_uri(relative_url)
 
 class KakaoLoginSerializer(serializers.Serializer) :
     accessToken = serializers.CharField()
