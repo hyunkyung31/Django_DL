@@ -36,6 +36,9 @@ from api.views import (
     kakao_login,
     kakao_signup,
     exam_ai_run_and_persist,
+    appointment_list,
+    appointment_me,
+    appointment_detail,
 )
 from rest_framework_simplejwt.views import(
     TokenObtainPairView,
@@ -64,6 +67,9 @@ urlpatterns = [
     path("api/bookmarks/<int:bookmark_id>/", bookmark_detail),
     path("api/emr-signoffs/", EMRSignOffListCreateView.as_view()),
     path("api/emr-signoffs/<int:pk>/", EMRSignOffDetailView.as_view()),
+    path("api/appointments/", appointment_list),
+    path("api/appointments/me/", appointment_me),
+    path("api/appointments/<int:appointment_id>/", appointment_detail),
     path("api/consultations/", consultation_list),
     path("api/consultations/<int:consultation_id>/", consultation_detail,),
     path("api/consultations/<int:consultation_id>/status/", consultation_status_update,),

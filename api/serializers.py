@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from api.models import Doctor, Patient, Examination, AIResult, Bookmark, Consultation, Notification, EMRSignOff
 from api.models import ChatRoom, ChatMessage
-from api.models import Memo
+from api.models import Memo, Appointment
 
 import os
 from django.conf import settings
@@ -900,3 +900,77 @@ class MemoCreateUpdateSerializer(serializers.ModelSerializer):
             })
 
         return attrs
+
+
+class AppointmentCreateSerializer(serializers.Serializer):
+    department = serializers.CharField(max_length=50)
+    scheduled_at = serializers.DateTimeField()
+    doctor_id = serializers.CharField(
+        max_length=20,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        default=None,
+    )
+    memo = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        if "doctorId" in data and "doctor_id" not in data:
+            data["doctor_id"] = data.get("doctorId")
+        if "scheduledAt" in data and "scheduled_at" not in data:
+            data["scheduled_at"] = data.get("scheduledAt")
+        return super().to_internal_value(data)
+
+
+class AppointmentSerializer(serializers.ModelSerializer):
+    patient_name = serializers.SerializerMethodField()
+    doctor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Appointment
+        fields = [
+            "id",
+            "patient_id",
+            "patient_name",
+            "doctor_id",
+            "doctor_name",
+            "department",
+            "scheduled_at",
+            "status",
+            "memo",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_patient_name(self, obj):
+        patient = Patient.objects.filter(patient_id=obj.patient_id).first()
+        return patient.patient_name if patient else ""
+
+    def get_doctor_name(self, obj):
+        doctor = Doctor.objects.filter(doctor_id=obj.doctor_id).first()
+        return doctor.doctor_name if doctor else ""
+
+
+class AppointmentUpdateSerializer(serializers.Serializer):
+    scheduled_at = serializers.DateTimeField(required=False)
+    memo = serializers.CharField(required=False, allow_blank=True)
+    status = serializers.ChoiceField(
+        choices=Appointment.Status.choices,
+        required=False,
+    )
+    department = serializers.CharField(max_length=50, required=False)
+    doctor_id = serializers.CharField(max_length=20, required=False)
+
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        if "scheduledAt" in data and "scheduled_at" not in data:
+            data["scheduled_at"] = data.get("scheduledAt")
+        if "doctorId" in data and "doctor_id" not in data:
+            data["doctor_id"] = data.get("doctorId")
+        return super().to_internal_value(data)
