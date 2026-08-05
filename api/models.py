@@ -418,3 +418,52 @@ class PatientAuth(models.Model):
 
     def __str__(self):
         return f"{self.provider}:{self.provider_user_id}"
+
+
+class Appointment(models.Model):
+    """환자 진료 예약. Doctor/Patient는 unmanaged라 id 문자열로 연결."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "신청"
+        CONFIRMED = "confirmed", "확정"
+        CANCELLED = "cancelled", "취소"
+        COMPLETED = "completed", "완료"
+
+    id = models.BigAutoField(primary_key=True)
+    patient_id = models.CharField(max_length=50, db_index=True)
+    doctor_id = models.CharField(max_length=20, db_index=True)
+    department = models.CharField(max_length=50)
+    scheduled_at = models.DateTimeField(db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.REQUESTED,
+        db_index=True,
+    )
+    memo = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "appointments"
+        ordering = ["-scheduled_at", "-created_at"]
+        indexes = [
+            models.Index(
+                fields=["doctor_id", "scheduled_at"],
+                name="appt_doctor_sched_idx",
+            ),
+            models.Index(
+                fields=["patient_id", "scheduled_at"],
+                name="appt_patient_sched_idx",
+            ),
+            models.Index(
+                fields=["doctor_id", "status"],
+                name="appt_doctor_status_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Appointment({self.id}, {self.patient_id} → "
+            f"{self.doctor_id}, {self.status})"
+        )
