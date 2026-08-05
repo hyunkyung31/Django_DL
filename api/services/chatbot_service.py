@@ -32,6 +32,13 @@ from api.services.summary_service import (
 
 from api.services.summary_gpt import summarize
 
+# 첫 질문으로 세션 제목 설정 (홈 history 미리보기용)
+if not session.title or session.title == "새로운 상담":
+    short = (message or "").strip().replace("\n", " ")
+    if short:
+        session.title = short[:50]
+        session.save(update_fields=["title", "updated_at"])
+
 
 def chat(
     patient_id: str,
