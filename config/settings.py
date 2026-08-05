@@ -151,3 +151,7 @@ AI_SERVER_URL = os.environ.get("AI_SERVER_URL", "http://127.0.0.1:8001")
 # 비우면 로컬 MEDIA_ROOT 사용. 예: angio-cdss-media
 GCS_MEDIA_BUCKET = os.environ.get("GCS_MEDIA_BUCKET", "").strip()
 GCS_PROJECT = os.environ.get("GCS_PROJECT", "").strip()
+CLINICAL_REPORT_FONT_PATH = os.environ.get(
+    "CLINICAL_REPORT_FONT_PATH",
+    "",
+).strip()

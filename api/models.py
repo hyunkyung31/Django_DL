@@ -360,9 +360,24 @@ class EMRSignOff(models.Model):
     finalized = models.BooleanField(default=False)
     final_result = models.TextField(blank=True, default="")
     ai_result = models.JSONField(null=True, blank=True)
-    emr_transmitted = models.BooleanField(default=False)
-    transmitted_at = models.DateTimeField(null=True, blank=True)
+
     report_ready = models.BooleanField(default=False)
+    report_path = models.CharField(
+        max_length=512,
+        null=True,
+        blank=True,
+    )
+    report_generated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    emr_transmitted = models.BooleanField(default=False)
+    transmitted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -371,7 +386,13 @@ class EMRSignOff(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"EMRSignOff({self.id}, {self.patient_id}, {self.doctor_id})"
+        return (
+            f"EMRSignOff("
+            f"{self.id}, "
+            f"{self.patient_id}, "
+            f"{self.doctor_id}"
+            f")"
+        )
 
 class PatientAuth(models.Model):
     auth_id = models.BigAutoField(primary_key=True)

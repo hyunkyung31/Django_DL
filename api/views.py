@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework_simplejwt.tokens import RefreshToken
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from django.db.models import Q
 
 from django.db import transaction
@@ -30,7 +30,17 @@ from api.models import (
     Memo,
 )
 from api.ai_persist import AiPersistError, run_and_persist_exam_ai
-from api.media_utils import build_media_url, resolve_local_media_path, save_media_file
+from api.media_utils import (
+    build_media_url,
+    download_media_bytes,
+    resolve_local_media_path,
+    save_media_bytes,
+    save_media_file,
+)
+from api.services.clinical_report_pdf import (
+    ClinicalReportPdfError,
+    generate_clinical_report_pdf,
+)
 from api.serializers import (
     LoginSerializer,
     LoginResponseSerializer,
@@ -1426,27 +1436,240 @@ def _validate_memo_relations(patient_id, exam_id):
 
 
 class EMRSignOffListCreateView(generics.ListCreateAPIView):
-    queryset = EMRSignOff.objects.all().order_by("-created_at")
     serializer_class = EMRSignOffSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        return EMRSignOff.objects.filter(
+            doctor_id=self.request.user.username,
+        ).order_by("-created_at")
+
     def perform_create(self, serializer):
-        with transaction.atomic():
-            obj = serializer.save(doctor_id=self.request.user.username)
-            if obj.emr_transmitted and not obj.transmitted_at:
-                obj.transmitted_at = timezone.now()
-                obj.save(update_fields=["transmitted_at"])
+        serializer.save(
+            doctor_id=self.request.user.username,
+        )
 
 
 class EMRSignOffDetailView(generics.RetrieveUpdateAPIView):
-    queryset = EMRSignOff.objects.all()
     serializer_class = EMRSignOffSerializer
     permission_classes = [IsAuthenticated]
 
-    def perform_update(self, serializer):
-        with transaction.atomic():
-            obj = serializer.save()
-            if obj.emr_transmitted and not obj.transmitted_at:
-                obj.transmitted_at = timezone.now()
-                obj.save(update_fields=["transmitted_at"])
+    def get_queryset(self):
+        return EMRSignOff.objects.filter(
+            doctor_id=self.request.user.username,
+        )
 
+def _get_owned_emr_signoff(request, pk):
+    return EMRSignOff.objects.filter(
+        pk=pk,
+        doctor_id=request.user.username,
+    ).first()
+
+
+@extend_schema(
+    methods=["GET"],
+    responses={
+        200: OpenApiResponse(
+            description="생성된 임상 보고서 PDF 파일",
+        ),
+        404: OpenApiResponse(
+            description="보고서 또는 소견을 찾을 수 없음",
+        ),
+    },
+    tags=["emr"],
+)
+@extend_schema(
+    methods=["POST"],
+    request=None,
+    responses={
+        200: EMRSignOffSerializer,
+        400: OpenApiResponse(
+            description="보고서 생성 조건을 충족하지 못함",
+        ),
+        404: OpenApiResponse(
+            description="소견을 찾을 수 없음",
+        ),
+    },
+    tags=["emr"],
+)
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def emr_signoff_report(request, pk):
+    signoff = _get_owned_emr_signoff(
+        request,
+        pk,
+    )
+
+    if signoff is None:
+        return Response(
+            {"detail": "임상 소견을 찾을 수 없습니다."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        if not signoff.report_ready or not signoff.report_path:
+            return Response(
+                {"detail": "생성된 임상 보고서가 없습니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            content, _, content_type = download_media_bytes(
+                signoff.report_path,
+            )
+        except FileNotFoundError:
+            return Response(
+                {"detail": "저장된 임상 보고서 파일을 찾을 수 없습니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        filename = f"vena_clinical_report_{signoff.pk}.pdf"
+
+        return FileResponse(
+            io.BytesIO(content),
+            as_attachment=True,
+            filename=filename,
+            content_type=content_type or "application/pdf",
+        )
+
+    if not signoff.finalized:
+        return Response(
+            {"detail": "최종 승인된 임상 소견만 보고서로 생성할 수 있습니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not signoff.final_result.strip():
+        return Response(
+            {"detail": "최종 의료진 소견이 없습니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not signoff.ai_result:
+        return Response(
+            {"detail": "저장된 AI 분석 결과가 없습니다."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        pdf_content = generate_clinical_report_pdf(
+            signoff,
+        )
+    except ClinicalReportPdfError as error:
+        return Response(
+            {"detail": str(error)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    filename = f"clinical_report_{signoff.pk}.pdf"
+
+    try:
+        stored_path = save_media_bytes(
+            patient_id=signoff.patient_id,
+            media_type="reports",
+            filename=filename,
+            content=pdf_content,
+            content_type="application/pdf",
+        )
+    except OSError:
+        return Response(
+            {"detail": "임상 보고서 파일 저장에 실패했습니다."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    generated_at = timezone.now()
+
+    with transaction.atomic():
+        locked_signoff = EMRSignOff.objects.select_for_update().filter(
+            pk=signoff.pk,
+            doctor_id=request.user.username,
+        ).first()
+
+        if locked_signoff is None:
+            return Response(
+                {"detail": "임상 소견을 찾을 수 없습니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        locked_signoff.report_path = stored_path
+        locked_signoff.report_generated_at = generated_at
+        locked_signoff.report_ready = True
+        locked_signoff.save(
+            update_fields=[
+                "report_path",
+                "report_generated_at",
+                "report_ready",
+                "updated_at",
+            ]
+        )
+
+    serializer = EMRSignOffSerializer(
+        locked_signoff,
+        context={"request": request},
+    )
+
+    return Response(
+        serializer.data,
+        status=status.HTTP_200_OK,
+    )
+
+
+@extend_schema(
+    request=None,
+    responses={
+        200: EMRSignOffSerializer,
+        400: OpenApiResponse(
+            description="전달 조건을 충족하지 못함",
+        ),
+        404: OpenApiResponse(
+            description="소견을 찾을 수 없음",
+        ),
+    },
+    tags=["emr"],
+)
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def emr_signoff_transmit(request, pk):
+    with transaction.atomic():
+        signoff = EMRSignOff.objects.select_for_update().filter(
+            pk=pk,
+            doctor_id=request.user.username,
+        ).first()
+
+        if signoff is None:
+            return Response(
+                {"detail": "임상 소견을 찾을 수 없습니다."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not signoff.finalized:
+            return Response(
+                {"detail": "최종 승인되지 않은 임상 소견입니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not signoff.report_ready or not signoff.report_path:
+            return Response(
+                {"detail": "임상 보고서를 먼저 생성해야 합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not signoff.emr_transmitted:
+            signoff.emr_transmitted = True
+            signoff.transmitted_at = timezone.now()
+            signoff.save(
+                update_fields=[
+                    "emr_transmitted",
+                    "transmitted_at",
+                    "updated_at",
+                ]
+            )
+
+    serializer = EMRSignOffSerializer(
+        signoff,
+        context={"request": request},
+    )
+
+    return Response(
+        serializer.data,
+        status=status.HTTP_200_OK,
+    )
