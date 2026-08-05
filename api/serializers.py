@@ -379,12 +379,19 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class EMRSignOffSerializer(serializers.ModelSerializer):
+    exam_id = serializers.IntegerField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+
     class Meta:
         model = EMRSignOff
         fields = [
             "id",
             "patient_id",
             "doctor_id",
+            "exam_id",
             "finalized",
             "final_result",
             "ai_result",
@@ -394,7 +401,98 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ("id", "doctor_id", "created_at", "updated_at", "transmitted_at")
+        read_only_fields = [
+            "id",
+            "doctor_id",
+            "ai_result",
+            "emr_transmitted",
+            "transmitted_at",
+            "report_ready",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        patient_id = attrs.get(
+            "patient_id",
+            getattr(self.instance, "patient_id", None),
+        )
+        exam_id = attrs.get("exam_id")
+        finalized = attrs.get(
+            "finalized",
+            getattr(self.instance, "finalized", False),
+        )
+        final_result = attrs.get(
+            "final_result",
+            getattr(self.instance, "final_result", ""),
+        )
+
+        if patient_id and not Patient.objects.filter(
+            patient_id=patient_id,
+        ).exists():
+            raise serializers.ValidationError({
+                "patient_id": "환자를 찾을 수 없습니다.",
+            })
+
+        if exam_id is not None:
+            examination = Examination.objects.filter(
+                exam_id=exam_id,
+            ).first()
+
+            if examination is None:
+                raise serializers.ValidationError({
+                    "exam_id": "검사 기록을 찾을 수 없습니다.",
+                })
+
+            if patient_id and examination.patient_id != patient_id:
+                raise serializers.ValidationError({
+                    "exam_id": "환자와 검사 기록이 일치하지 않습니다.",
+                })
+
+            if not AIResult.objects.filter(exam_id=exam_id).exists():
+                raise serializers.ValidationError({
+                    "exam_id": "해당 검사의 AI 분석 결과가 없습니다.",
+                })
+
+        if finalized and not final_result.strip():
+            raise serializers.ValidationError({
+                "final_result": "최종 승인 시 의료진 소견을 입력해야 합니다.",
+            })
+
+        return attrs
+
+    def create(self, validated_data):
+        exam_id = validated_data.pop("exam_id", None)
+
+        if exam_id is not None:
+            validated_data["ai_result"] = self._build_ai_result_snapshot(
+                exam_id,
+            )
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        exam_id = validated_data.pop("exam_id", None)
+
+        if instance.finalized:
+            raise serializers.ValidationError(
+                "최종 승인된 보고서는 수정할 수 없습니다."
+            )
+
+        if exam_id is not None:
+            validated_data["ai_result"] = self._build_ai_result_snapshot(
+                exam_id,
+            )
+
+        return super().update(instance, validated_data)
+
+    def _build_ai_result_snapshot(self, exam_id):
+        ai_result = AIResult.objects.get(exam_id=exam_id)
+
+        return AIResultSerializer(
+            ai_result,
+            context=self.context,
+        ).data
 
 class KakaoLoginSerializer(serializers.Serializer) :
     accessToken = serializers.CharField()

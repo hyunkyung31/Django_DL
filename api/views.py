@@ -1426,27 +1426,25 @@ def _validate_memo_relations(patient_id, exam_id):
 
 
 class EMRSignOffListCreateView(generics.ListCreateAPIView):
-    queryset = EMRSignOff.objects.all().order_by("-created_at")
     serializer_class = EMRSignOffSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        return EMRSignOff.objects.filter(
+            doctor_id=self.request.user.username,
+        ).order_by("-created_at")
+
     def perform_create(self, serializer):
-        with transaction.atomic():
-            obj = serializer.save(doctor_id=self.request.user.username)
-            if obj.emr_transmitted and not obj.transmitted_at:
-                obj.transmitted_at = timezone.now()
-                obj.save(update_fields=["transmitted_at"])
+        serializer.save(
+            doctor_id=self.request.user.username,
+        )
 
 
 class EMRSignOffDetailView(generics.RetrieveUpdateAPIView):
-    queryset = EMRSignOff.objects.all()
     serializer_class = EMRSignOffSerializer
     permission_classes = [IsAuthenticated]
 
-    def perform_update(self, serializer):
-        with transaction.atomic():
-            obj = serializer.save()
-            if obj.emr_transmitted and not obj.transmitted_at:
-                obj.transmitted_at = timezone.now()
-                obj.save(update_fields=["transmitted_at"])
-
+    def get_queryset(self):
+        return EMRSignOff.objects.filter(
+            doctor_id=self.request.user.username,
+        )
