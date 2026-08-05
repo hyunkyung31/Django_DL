@@ -157,7 +157,7 @@ class ChatRoom(models.Model):
                 name="unique_doctor_chat_room",
             ),
             models.CheckConstraint(
-                condition=models.Q(
+                check=models.Q(
                     doctor1_id__lt=models.F("doctor2_id")
                 ),
                 name="chat_doctor_order_check",
