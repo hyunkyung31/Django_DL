@@ -6,7 +6,11 @@ import cv2
 from PIL import Image
 from services.gradcam_service import generate_gradcam_data
 import numpy as np
-from services.yolo_service import detect_image
+from services.yolo_service import (
+    YOLO_CONFIDENCE_THRESHOLD,
+    YOLO_IOU_THRESHOLD,
+    detect_image,
+)
 from services.annotation_mapper import (map_yolo_detections_to_annotations,)
 from time import perf_counter # 코드 실행 시간 측정 함수
 
@@ -694,8 +698,8 @@ def build_detection_summary(
     
 def detect_video_frames(
     input_path: Path,
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = YOLO_CONFIDENCE_THRESHOLD,
+    iou_threshold: float = YOLO_IOU_THRESHOLD,
 ) -> dict[str, object]:
     """
     입력 동영상의 모든 프레임에 YOLO 객체 탐지를 수행한다.
@@ -817,8 +821,8 @@ def detect_video_frames(
 
 def analyze_video_frames(
     input_path: Path,
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = YOLO_CONFIDENCE_THRESHOLD,
+    iou_threshold: float = YOLO_IOU_THRESHOLD,
     save_gradcam_images: bool = True,
 ) -> dict[str, object]:
     """

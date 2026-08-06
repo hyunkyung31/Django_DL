@@ -608,7 +608,7 @@ def exam_ai_run_and_persist(request, exam_id: int):
         except (TypeError, ValueError):
             return default
 
-    confidence_threshold = _float_param("confidence_threshold", 0.25)
+    confidence_threshold = _float_param("confidence_threshold", 0.35)
     iou_threshold = _float_param("iou_threshold", 0.45)
 
     if not 0.0 <= confidence_threshold <= 1.0 or not 0.0 <= iou_threshold <= 1.0:
