@@ -374,6 +374,25 @@ def patient_detail(request, patient_id):
     exams = Examination.objects.filter(patient_id=patient_id).order_by("exam_id")
     exam_ids = [e.exam_id for e in exams]
     ai_results = AIResult.objects.filter(exam_id__in=exam_ids)
+
+    # 환자 본인 조회 시: 전달된 임상 보고서 목록도 포함 (앱 fallback용)
+    role, actor_id = _emr_actor_role(request.user)
+    include_reports = (
+        role == "doctor"
+        or (role == "patient" and actor_id == patient_id)
+    )
+    emr_signoffs = []
+    if include_reports:
+        report_qs = EMRSignOff.objects.filter(patient_id=patient_id)
+        if role == "patient":
+            report_qs = report_qs.filter(emr_transmitted=True)
+        report_qs = report_qs.order_by("-transmitted_at", "-created_at")
+        emr_signoffs = EMRSignOffSerializer(
+            report_qs,
+            many=True,
+            context={"request": request},
+        ).data
+
     return Response({
         "patient": PatientSerializer(patient, context={"request": request}).data,
         "examinations": ExaminationSerializer(
@@ -382,6 +401,8 @@ def patient_detail(request, patient_id):
         "ai_results": AIResultSerializer(
             ai_results, many=True, context={"request": request}
         ).data,
+        "emr_signoffs": emr_signoffs,
+        "clinical_reports": emr_signoffs,
     })
 
 @extend_schema(
@@ -1439,14 +1460,46 @@ def _validate_memo_relations(patient_id, exam_id):
     return None
 
 
+def _emr_actor_role(user):
+    """JWT username이 doctor / patient 인지 판별 (EMR 전용)."""
+    username = user.username
+    if Doctor.objects.filter(doctor_id=username).exists():
+        return "doctor", username
+    if Patient.objects.filter(patient_id=username).exists():
+        return "patient", username
+    return None, username
+
+
+def _patient_transmitted_emr_qs(patient_id: str):
+    return EMRSignOff.objects.filter(
+        patient_id=patient_id,
+        emr_transmitted=True,
+    ).order_by("-transmitted_at", "-created_at")
+
+
 class EMRSignOffListCreateView(generics.ListCreateAPIView):
     serializer_class = EMRSignOffSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return EMRSignOff.objects.filter(
-            doctor_id=self.request.user.username,
-        ).order_by("-created_at")
+        role, actor_id = _emr_actor_role(self.request.user)
+        if role == "doctor":
+            return EMRSignOff.objects.filter(
+                doctor_id=actor_id,
+            ).order_by("-created_at")
+        if role == "patient":
+            # 환자 JWT: 본인에게 전달된 보고서만
+            return _patient_transmitted_emr_qs(actor_id)
+        return EMRSignOff.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        role, _ = _emr_actor_role(request.user)
+        if role != "doctor":
+            return Response(
+                {"detail": "의사 계정만 임상 소견을 생성할 수 있습니다."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         serializer.save(
@@ -1459,15 +1512,69 @@ class EMRSignOffDetailView(generics.RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        role, actor_id = _emr_actor_role(self.request.user)
+        if role == "doctor":
+            return EMRSignOff.objects.filter(doctor_id=actor_id)
+        if role == "patient":
+            return _patient_transmitted_emr_qs(actor_id)
+        return EMRSignOff.objects.none()
+
+    def update(self, request, *args, **kwargs):
+        role, _ = _emr_actor_role(request.user)
+        if role != "doctor":
+            return Response(
+                {"detail": "의사 계정만 임상 소견을 수정할 수 있습니다."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().update(request, *args, **kwargs)
+
+
+def _get_owned_emr_signoff(request, pk, *, for_write: bool = False):
+    """
+    의사: 본인 작성 소견.
+    환자(읽기): 본인 환자 + emr_transmitted=true 인 소견.
+    """
+    role, actor_id = _emr_actor_role(request.user)
+    if role == "doctor":
         return EMRSignOff.objects.filter(
-            doctor_id=self.request.user.username,
+            pk=pk,
+            doctor_id=actor_id,
+        ).first()
+
+    if for_write:
+        return None
+
+    if role == "patient":
+        return _patient_transmitted_emr_qs(actor_id).filter(pk=pk).first()
+
+    return None
+
+
+@extend_schema(
+    responses={200: EMRSignOffSerializer(many=True)},
+    tags=["emr"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def emr_signoff_me(request):
+    """
+    GET /api/emr-signoffs/me/
+    로그인한 환자에게 전달된(emr_transmitted=true) 임상 보고서 목록.
+    """
+    role, actor_id = _emr_actor_role(request.user)
+    if role != "patient":
+        return Response(
+            {"detail": "환자 계정으로만 조회할 수 있습니다."},
+            status=status.HTTP_403_FORBIDDEN,
         )
 
-def _get_owned_emr_signoff(request, pk):
-    return EMRSignOff.objects.filter(
-        pk=pk,
-        doctor_id=request.user.username,
-    ).first()
+    qs = _patient_transmitted_emr_qs(actor_id)
+    serializer = EMRSignOffSerializer(
+        qs,
+        many=True,
+        context={"request": request},
+    )
+    return Response(serializer.data)
 
 
 @extend_schema(
@@ -1499,9 +1606,11 @@ def _get_owned_emr_signoff(request, pk):
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def emr_signoff_report(request, pk):
+    # GET: 의사 또는 전달받은 환자 / POST(생성): 의사만
     signoff = _get_owned_emr_signoff(
         request,
         pk,
+        for_write=(request.method == "POST"),
     )
 
     if signoff is None:
@@ -1669,6 +1778,7 @@ def emr_signoff_transmit(request, pk):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        newly_transmitted = False
         if not signoff.emr_transmitted:
             signoff.emr_transmitted = True
             signoff.transmitted_at = timezone.now()
@@ -1678,6 +1788,21 @@ def emr_signoff_transmit(request, pk):
                     "transmitted_at",
                     "updated_at",
                 ]
+            )
+            newly_transmitted = True
+
+        # 선택: 담당 의사에게 전달 완료 알림
+        # (환자용 Notification 스키마가 없어 doctor inbox에 clinical_report_ready 기록)
+        if newly_transmitted:
+            Notification.objects.create(
+                recipient_doctor_id=signoff.doctor_id,
+                notification_type="clinical_report_ready",
+                title="임상 보고서 환자 전달 완료",
+                message=(
+                    f"{signoff.patient_id} 환자에게 "
+                    "임상 보고서가 전달되었습니다."
+                ),
+                is_read=False,
             )
 
     serializer = EMRSignOffSerializer(

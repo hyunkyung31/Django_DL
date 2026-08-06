@@ -33,6 +33,7 @@ from api.views import (
     notification_mark_read,
     EMRSignOffListCreateView,
     EMRSignOffDetailView,
+    emr_signoff_me,
     emr_signoff_report,
     emr_signoff_transmit,
     kakao_login,
@@ -85,6 +86,11 @@ urlpatterns = [
         "api/emr-signoffs/",
         EMRSignOffListCreateView.as_view(),
         name="emr-signoff-list",
+    ),
+    path(
+        "api/emr-signoffs/me/",
+        emr_signoff_me,
+        name="emr-signoff-me",
     ),
     path(
         "api/emr-signoffs/<int:pk>/",
