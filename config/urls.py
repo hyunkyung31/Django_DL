@@ -61,12 +61,16 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from api.patient_password_auth import patient_login, patient_signup
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/health/", health_check),
     path("api/login/", login),    
     path("api/auth/kakao/login/", kakao_login),
     path("api/auth/kakao/signup/", kakao_signup),
+    path("api/auth/patient/signup/", patient_signup),
+    path("api/auth/patient/login/", patient_login),
     path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/me/", me),
