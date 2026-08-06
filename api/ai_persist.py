@@ -28,7 +28,7 @@ def _call_analysis_image(
     image_bytes: bytes,
     filename: str,
     content_type: str,
-    confidence_threshold: float = 0.25,
+    confidence_threshold: float = 0.35,
     iou_threshold: float = 0.45,
     always_show_gradcam: bool = True,
 ) -> dict[str, Any]:
@@ -105,7 +105,7 @@ def _map_severity(
 
 def run_and_persist_exam_ai(
     exam_id: int,
-    confidence_threshold: float = 0.25,
+    confidence_threshold: float = 0.35,
     iou_threshold: float = 0.45,
 ) -> dict[str, Any]:
     """

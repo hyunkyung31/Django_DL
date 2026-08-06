@@ -2,7 +2,12 @@ from io import BytesIO
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
-from services.yolo_service import (detect_image, get_model_information,)
+from services.yolo_service import (
+    YOLO_CONFIDENCE_THRESHOLD,
+    YOLO_IOU_THRESHOLD,
+    detect_image,
+    get_model_information,
+)
 from uuid import uuid4
 from services.annotation_mapper import (map_yolo_detections_to_annotations,)
 
@@ -33,11 +38,13 @@ async def get_yolo_model_info() -> dict[str, object]:
 @router.post("/detect")
 async def detect_yolo_image(
     file: UploadFile = File(...),
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = YOLO_CONFIDENCE_THRESHOLD,
+    iou_threshold: float = YOLO_IOU_THRESHOLD,
 ) -> dict[str, object]:
     """
     업로드한 이미지에서 병변 Bounding Box를 탐지한다.
+
+    segment 가중치여도 mask는 사용하지 않고 bbox만 반환한다.
     """
     analysis_id = uuid4().hex # 요청할 때마다 새 analysis_id 생성
     if not file.filename:

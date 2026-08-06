@@ -7,22 +7,31 @@ from ultralytics import YOLO
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# VM에는 seg best 가중치를 이 경로로 올린다 (파일명은 유지).
+# 모델 task는 segment여도 제품 API는 bbox detection만 반환한다.
 MODEL_PATH = BASE_DIR / "models" / "best_yolo.pt"
 
-YOLO_IMAGE_SIZE = 1024
-YOLO_CONFIDENCE_THRESHOLD = 0.25
+# stenosis seg best 실험 기본값 (제품은 bbox만 사용)
+YOLO_IMAGE_SIZE = 640
+YOLO_CONFIDENCE_THRESHOLD = 0.35
 YOLO_IOU_THRESHOLD = 0.45
+
+# detect 전용 가중치와 seg 가중치(bbox만 사용) 모두 허용
+ALLOWED_YOLO_TASKS = frozenset({"detect", "segment"})
 
 
 def load_yolo_model() -> YOLO:
     """
-    YOLO 탐지 모델을 로딩한다.
+    YOLO 모델을 로딩한다.
+
+    detect 가중치와 segment 가중치를 모두 허용한다.
+    segment여도 추론 응답에서는 Bounding Box만 사용한다.
 
     Raises:
         FileNotFoundError:
             가중치 파일이 존재하지 않을 때 발생한다.
         ValueError:
-            로딩된 가중치가 객체 탐지 모델이 아닐 때 발생한다.
+            로딩된 가중치가 허용되지 않은 task일 때 발생한다.
     """
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
@@ -30,11 +39,12 @@ def load_yolo_model() -> YOLO:
         )
 
     loaded_model = YOLO(str(MODEL_PATH))
+    task = str(loaded_model.task)
 
-    if loaded_model.task != "detect":
+    if task not in ALLOWED_YOLO_TASKS:
         raise ValueError(
-            "현재 가중치는 객체 탐지 모델이 아닙니다. "
-            f"확인된 task: {loaded_model.task}"
+            "현재 가중치는 지원하지 않는 YOLO task입니다. "
+            f"허용: {sorted(ALLOWED_YOLO_TASKS)}, 확인된 task: {task}"
         )
 
     return loaded_model
@@ -62,6 +72,7 @@ def get_model_information() -> dict[str, Any]:
             "model_name": MODEL_PATH.name,
             "loaded": False,
             "task": None,
+            "product_mode": "detection",
             "class_count": 0,
             "class_names": {},
             "image_size": YOLO_IMAGE_SIZE,
@@ -80,6 +91,8 @@ def get_model_information() -> dict[str, Any]:
         "model_name": MODEL_PATH.name,
         "loaded": True,
         "task": str(model.task),
+        # seg 가중치여도 API/프론트 계약은 bbox detection
+        "product_mode": "detection",
         "class_count": len(class_names),
         "class_names": class_names,
         "image_size": YOLO_IMAGE_SIZE,
@@ -95,6 +108,8 @@ def detect_image(
 ) -> dict[str, Any]:
     """
     PIL 이미지 또는 NumPy 배열 한 장을 입력받아 객체 탐지를 수행한다.
+
+    segment 모델이어도 masks는 무시하고 boxes만 반환한다.
 
     Args:
         image:
@@ -184,43 +199,40 @@ def detect_image(
             normalized_y1 = y1 / image_height
             normalized_x2 = x2 / image_width
             normalized_y2 = y2 / image_height
-            
-            
+
             detections.append(
-               {
-                   "detection_id": f"det_{box_index}",
-                   "detection_index": box_index,
-                   "source": "ai",
-                   "edit_status": "original",
-                   "class_id": class_id,
-                   "class_name": class_name,
-                   "confidence": round(float(confidence), 6),
-                   "box": {
-                       "x1": round(x1, 4),
-                       "y1": round(y1, 4),
-                       "x2": round(x2, 4),
-                       "y2": round(y2, 4),
-                       "width": round(x2 - x1, 4),
-                       "height": round(y2 - y1, 4),
-                   },
-                   "box_normalized": {
-                       "x1": round(normalized_x1, 6),
-                       "y1": round(normalized_y1, 6),
-                       "x2": round(normalized_x2, 6),
-                       "y2": round(normalized_y2, 6),
-                       "width": round(
-                           normalized_x2 - normalized_x1,
-                           6,
-                       ),
-                       "height": round(
-                           normalized_y2 - normalized_y1,
-                           6,
-                       ),
-                   },
-               }
+                {
+                    "detection_id": f"det_{box_index}",
+                    "detection_index": box_index,
+                    "source": "ai",
+                    "edit_status": "original",
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": round(float(confidence), 6),
+                    "box": {
+                        "x1": round(x1, 4),
+                        "y1": round(y1, 4),
+                        "x2": round(x2, 4),
+                        "y2": round(y2, 4),
+                        "width": round(x2 - x1, 4),
+                        "height": round(y2 - y1, 4),
+                    },
+                    "box_normalized": {
+                        "x1": round(normalized_x1, 6),
+                        "y1": round(normalized_y1, 6),
+                        "x2": round(normalized_x2, 6),
+                        "y2": round(normalized_y2, 6),
+                        "width": round(
+                            normalized_x2 - normalized_x1,
+                            6,
+                        ),
+                        "height": round(
+                            normalized_y2 - normalized_y1,
+                            6,
+                        ),
+                    },
+                }
             )
-
-
 
     return {
         "image_width": int(image_width),

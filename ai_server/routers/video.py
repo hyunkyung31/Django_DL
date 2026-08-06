@@ -12,6 +12,10 @@ from services.video_service import (VideoProcessingError,
                                     create_upload_path,
                                     detect_video_frames,
 )
+from services.yolo_service import (
+    YOLO_CONFIDENCE_THRESHOLD,
+    YOLO_IOU_THRESHOLD,
+)
 from uuid import uuid4
 
 
@@ -294,8 +298,8 @@ async def classify_video_data(
 )
 async def detect_video_data(
     file: UploadFile = File(...),
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = YOLO_CONFIDENCE_THRESHOLD,
+    iou_threshold: float = YOLO_IOU_THRESHOLD,
 ) -> dict[str, object]:
     """
     업로드한 동영상의 모든 프레임에서 YOLO 탐지를 수행하고
@@ -396,8 +400,8 @@ async def detect_video_data(
 async def analyze_video_data(
     request: Request,
     file: UploadFile = File(...),
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = YOLO_CONFIDENCE_THRESHOLD,
+    iou_threshold: float = YOLO_IOU_THRESHOLD,
 ) -> dict[str, object]:
     """
     업로드한 동영상을 한 번만 순회하면서

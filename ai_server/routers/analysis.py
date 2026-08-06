@@ -7,7 +7,12 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 from services.gradcam_service import generate_gradcam
-from services.yolo_service import detect_image, get_model_information
+from services.yolo_service import (
+    YOLO_CONFIDENCE_THRESHOLD,
+    YOLO_IOU_THRESHOLD,
+    detect_image,
+    get_model_information,
+)
 
 
 router = APIRouter(
@@ -31,8 +36,8 @@ MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024
 )
 async def analyze_image(
     file: UploadFile = File(...),
-    confidence_threshold: float = 0.25,
-    iou_threshold: float = 0.45,
+    confidence_threshold: float = YOLO_CONFIDENCE_THRESHOLD,
+    iou_threshold: float = YOLO_IOU_THRESHOLD,
     always_show_gradcam: bool = True,
 ) -> dict[str, object]:
     """
@@ -40,7 +45,7 @@ async def analyze_image(
 
     1. InceptionV3 분류
     2. Grad-CAM 생성
-    3. YOLO 병변 탐지
+    3. YOLO 병변 탐지 (seg 가중치여도 bbox만 사용)
     4. 분석 결과 통합 반환
     """
 
