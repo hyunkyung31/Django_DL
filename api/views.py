@@ -2,8 +2,9 @@ import requests
 from django.conf import settings
 
 from django.contrib.auth.models import User
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -14,6 +15,18 @@ from django.db import transaction
 from django.db.models import Max
 from django.http import FileResponse
 from django.core import signing
+
+
+class PdfFileRenderer(BaseRenderer):
+    """Accept: application/pdf 요청이 DRF 406으로 거절되지 않도록."""
+
+    media_type = "application/pdf"
+    format = "pdf"
+    charset = None
+    render_style = "binary"
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        return data
 
 from api.models import (
     Doctor,
@@ -1605,6 +1618,7 @@ def emr_signoff_me(request):
 )
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
+@renderer_classes([JSONRenderer, PdfFileRenderer])
 def emr_signoff_report(request, pk):
     # GET: 의사 또는 전달받은 환자 / POST(생성): 의사만
     signoff = _get_owned_emr_signoff(
