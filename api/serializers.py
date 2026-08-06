@@ -389,6 +389,8 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    doctor_name = serializers.SerializerMethodField()
+    department = serializers.SerializerMethodField()
     report_url = serializers.SerializerMethodField()
     ai_summary = serializers.SerializerMethodField()
     xai_explanation = serializers.SerializerMethodField()
@@ -399,6 +401,8 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "id",
             "patient_id",
             "doctor_id",
+            "doctor_name",
+            "department",
             "exam_id",
             "finalized",
             "final_result",
@@ -416,6 +420,8 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "doctor_id",
+            "doctor_name",
+            "department",
             "ai_result",
             "ai_summary",
             "xai_explanation",
@@ -511,6 +517,23 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             ).data
         return dict(serialized)
     
+    def _doctor(self, obj):
+        cache = self.context.setdefault("_emr_doctor_cache", {})
+        doctor_id = obj.doctor_id
+        if doctor_id not in cache:
+            cache[doctor_id] = Doctor.objects.filter(
+                doctor_id=doctor_id,
+            ).first()
+        return cache[doctor_id]
+
+    def get_doctor_name(self, obj) -> str:
+        doctor = self._doctor(obj)
+        return doctor.doctor_name if doctor else ""
+
+    def get_department(self, obj) -> str:
+        doctor = self._doctor(obj)
+        return doctor.department if doctor else ""
+
     def get_ai_summary(self, obj) -> str:
         return build_patient_ai_summary(
             obj.ai_result
