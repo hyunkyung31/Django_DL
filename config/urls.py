@@ -46,6 +46,8 @@ from api.views import (
 from api.gpt_views import (
     GPTTestView,
     ChatAPIView,
+)
+from api.chatbot_session_views import (
     chatbot_session_list,
     chatbot_session_detail,
 )
