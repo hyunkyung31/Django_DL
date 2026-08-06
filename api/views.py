@@ -1581,7 +1581,8 @@ def emr_signoff_report(request, pk):
         )
 
     generated_at = timezone.now()
-
+    
+    
     with transaction.atomic():
         locked_signoff = EMRSignOff.objects.select_for_update().filter(
             pk=signoff.pk,
@@ -1602,9 +1603,20 @@ def emr_signoff_report(request, pk):
                 "report_path",
                 "report_generated_at",
                 "report_ready",
-                "updated_at",
             ]
         )
+
+        Notification.objects.create(
+            recipient_doctor_id=locked_signoff.doctor_id,
+            notification_type="clinical_report_ready",
+            title="임상 보고서 생성 완료",
+            message=(
+                f"{locked_signoff.patient_id} 환자의 "
+                "임상 보고서가 생성되었습니다."
+            ),
+            is_read=False,
+        )
+        
 
     serializer = EMRSignOffSerializer(
         locked_signoff,

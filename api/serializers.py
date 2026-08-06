@@ -7,6 +7,10 @@ import os
 from django.conf import settings
 from django.urls import reverse
 from api.media_utils import build_media_url
+from api.services.clinical_report_content import (
+    build_patient_ai_summary,
+    build_patient_xai_explanation,
+)
 
 def _normalize_ecg_type(raw: str | None) -> str | None:
     if not raw:
@@ -386,6 +390,8 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     report_url = serializers.SerializerMethodField()
+    ai_summary = serializers.SerializerMethodField()
+    xai_explanation = serializers.SerializerMethodField()
 
     class Meta:
         model = EMRSignOff
@@ -397,6 +403,8 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "finalized",
             "final_result",
             "ai_result",
+            "ai_summary",
+            "xai_explanation",
             "report_url",
             "report_generated_at",
             "emr_transmitted",
@@ -409,6 +417,8 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             "id",
             "doctor_id",
             "ai_result",
+            "ai_summary",
+            "xai_explanation",
             "report_url",
             "report_generated_at",
             "emr_transmitted",
@@ -500,6 +510,19 @@ class EMRSignOffSerializer(serializers.ModelSerializer):
             context=self.context,
             ).data
         return dict(serialized)
+    
+    def get_ai_summary(self, obj) -> str:
+        return build_patient_ai_summary(
+            obj.ai_result
+        )
+
+
+    def get_xai_explanation(self, obj) -> str:
+        return build_patient_xai_explanation(
+            obj.ai_result
+        )
+    
+    
 
     def get_report_url(self, obj) -> str | None:
         if not obj.report_ready or not obj.report_path:

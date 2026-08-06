@@ -14,8 +14,6 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    Image,
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -23,8 +21,14 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from api.media_utils import download_media_bytes
 from api.models import Doctor, EMRSignOff, Examination, Patient
+from api.services.clinical_report_content import (
+    build_patient_ai_result_label,
+    build_patient_ai_summary,
+    build_patient_xai_explanation,
+    clean_final_result,
+    safe_text,
+)
 
 
 class ClinicalReportPdfError(Exception):
@@ -62,38 +66,11 @@ def _register_report_font() -> str:
     return _REPORT_FONT_NAME
 
 
-def _safe_text(value: Any, default: str = "-") -> str:
-    if value is None:
-        return default
-
-    text = str(value).strip()
-
-    return text or default
-
-
-def _format_boolean(value: Any) -> str:
-    if value is True:
-        return "예"
-
-    if value is False:
-        return "아니오"
-
-    return "-"
-
-
-def _format_percent(value: Any) -> str:
-    if value is None:
-        return "-"
-
-    try:
-        number = float(value)
-
-        if 0 <= number <= 1:
-            number *= 100
-
-        return f"{number:.2f}%"
-    except (TypeError, ValueError):
-        return _safe_text(value)
+def _safe_text(
+    value: Any,
+    default: str = "-",
+) -> str:
+    return safe_text(value, default=default)
 
 
 def _build_styles(
@@ -119,20 +96,35 @@ def _build_styles(
             leading=18,
             spaceBefore=10,
             spaceAfter=8,
+            textColor=colors.HexColor("#183B7A"),
         ),
         "body": ParagraphStyle(
             "ClinicalReportBody",
             parent=base["BodyText"],
             fontName=font_name,
             fontSize=9.5,
-            leading=14,
+            leading=15,
         ),
         "small": ParagraphStyle(
             "ClinicalReportSmall",
             parent=base["BodyText"],
             fontName=font_name,
             fontSize=8,
-            leading=11,
+            leading=12,
+            textColor=colors.HexColor("#4B5563"),
+        ),
+        "notice": ParagraphStyle(
+            "ClinicalReportNotice",
+            parent=base["BodyText"],
+            fontName=font_name,
+            fontSize=8.5,
+            leading=13,
+            textColor=colors.HexColor("#374151"),
+            backColor=colors.HexColor("#F3F6FA"),
+            borderColor=colors.HexColor("#D7DEE8"),
+            borderWidth=0.5,
+            borderPadding=8,
+            spaceBefore=8,
         ),
     }
 
@@ -224,50 +216,6 @@ def _build_info_table(
     return table
 
 
-def _load_report_image(
-    stored_path: str | None,
-    max_width_mm: float = 160,
-    max_height_mm: float = 90,
-) -> Image | None:
-    if not stored_path:
-        return None
-
-    try:
-        content, _, _ = download_media_bytes(
-            stored_path,
-        )
-    except (FileNotFoundError, OSError):
-        return None
-
-    image_buffer = io.BytesIO(content)
-
-    try:
-        report_image = Image(image_buffer)
-    except Exception:
-        return None
-
-    max_width = max_width_mm * mm
-    max_height = max_height_mm * mm
-
-    width_ratio = max_width / report_image.imageWidth
-    height_ratio = max_height / report_image.imageHeight
-    scale = min(
-        width_ratio,
-        height_ratio,
-        1,
-    )
-
-    report_image.drawWidth = (
-        report_image.imageWidth * scale
-    )
-    report_image.drawHeight = (
-        report_image.imageHeight * scale
-    )
-    report_image.hAlign = "CENTER"
-
-    return report_image
-
-
 def generate_clinical_report_pdf(
     signoff: EMRSignOff,
 ) -> bytes:
@@ -332,7 +280,7 @@ def generate_clinical_report_pdf(
 
     story = [
         Paragraph(
-            "VENA 관상동맥 AI 임상 보고서",
+            "관상동맥 조영술 임상 보고서",
             styles["title"],
         ),
         _paragraph(
@@ -346,30 +294,17 @@ def generate_clinical_report_pdf(
             ),
             styles["small"],
         ),
-        Spacer(1, 8 * mm),
+        Spacer(1, 7 * mm),
         Paragraph(
-            "환자 정보",
+            "환자 및 검사 정보",
             styles["section"],
         ),
         _build_info_table(
             [
-                ("환자 ID", patient.patient_id),
                 ("환자명", patient.patient_name),
+                ("환자 ID", patient.patient_id),
                 ("성별", patient.gender),
                 ("나이", patient.age),
-                ("주호소", patient.chief_complaint),
-                ("심전도 결과", patient.ecg_result),
-                ("Troponin-T", patient.troponin_t_level),
-                ("위험인자 수", patient.risk_factors_count),
-            ],
-            styles,
-        ),
-        Paragraph(
-            "검사 정보",
-            styles["section"],
-        ),
-        _build_info_table(
-            [
                 ("검사 ID", exam_id),
                 (
                     "혈관 유형",
@@ -383,119 +318,74 @@ def generate_clinical_report_pdf(
             styles,
         ),
         Paragraph(
-            "AI 분석 결과",
+            "AI 보조 분석 결과",
             styles["section"],
         ),
         _build_info_table(
             [
                 (
-                    "병변 탐지",
-                    _format_boolean(
-                        ai_result.get("has_lesion")
-                    ),
-                ),
-                (
-                    "중증도",
-                    ai_result.get("severity_class"),
-                ),
-                (
-                    "신뢰도",
-                    _format_percent(
-                        ai_result.get("confidence_score")
-                    ),
-                ),
-                (
-                    "HEART Score",
-                    ai_result.get("heart_score"),
-                ),
-                (
-                    "MACE 위험도",
-                    _format_percent(
-                        ai_result.get("mace_risk_percent")
+                    "분석 결과",
+                    build_patient_ai_result_label(
+                        ai_result
                     ),
                 ),
             ],
             styles,
         ),
-    ]
-
-    key_frame_image = _load_report_image(
-        getattr(
-            examination,
-            "key_frame_path",
-            None,
-        )
-    )
-
-    if key_frame_image is not None:
-        story.extend(
+        Spacer(1, 3 * mm),
+        _paragraph(
+            build_patient_ai_summary(ai_result),
+            styles["body"],
+        ),
+        Paragraph(
+            "AI 분석에 대한 안내",
+            styles["section"],
+        ),
+        _paragraph(
+            build_patient_xai_explanation(ai_result),
+            styles["body"],
+        ),
+        Paragraph(
+            "의료진 최종 소견",
+            styles["section"],
+        ),
+        _paragraph(
+            clean_final_result(signoff.final_result),
+            styles["body"],
+        ),
+        Spacer(1, 8 * mm),
+        Paragraph(
+            "승인 의료진",
+            styles["section"],
+        ),
+        _build_info_table(
             [
-                Paragraph(
-                    "대표 혈관조영 영상",
-                    styles["section"],
-                ),
-                key_frame_image,
-            ]
-        )
-
-    gradcam_image = _load_report_image(
-        ai_result.get("gradcam_path")
-    )
-
-    if gradcam_image is not None:
-        story.extend(
-            [
-                Paragraph(
-                    "Grad-CAM 분석 영상",
-                    styles["section"],
-                ),
-                gradcam_image,
-            ]
-        )
-
-    story.extend(
-        [
-            PageBreak(),
-            Paragraph(
-                "최종 의료진 소견",
-                styles["section"],
-            ),
-            _paragraph(
-                signoff.final_result,
-                styles["body"],
-            ),
-            Spacer(1, 10 * mm),
-            Paragraph(
-                "승인 의료진",
-                styles["section"],
-            ),
-            _build_info_table(
-                [
-                    ("의료진 ID", doctor.doctor_id),
-                    ("의료진명", doctor.doctor_name),
-                    ("진료과", doctor.department),
-                    ("병원", doctor.hospital_name),
-                    (
-                        "최종 승인 시각",
-                        timezone.localtime(
-                            signoff.updated_at
-                        ).strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),
-                    ),
-                ],
-                styles,
-            ),
-            Spacer(1, 12 * mm),
-            _paragraph(
+                ("의료진명", doctor.doctor_name),
+                ("진료과", doctor.department),
+                ("병원", doctor.hospital_name),
                 (
-                    "본 보고서는 AI 분석 결과를 의료진이 검토하고 "
-                    "최종 승인한 임상 지원 문서입니다."
+                    "최종 승인 시각",
+                    timezone.localtime(
+                        signoff.updated_at
+                    ).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
                 ),
-                styles["small"],
+            ],
+            styles,
+        ),
+        Spacer(1, 8 * mm),
+        _paragraph(
+            (
+                "본 보고서의 AI 분석 결과는 의료진의 영상 판독과 "
+                "임상적 판단을 보조하기 위한 정보입니다. "
+                "AI 분석만으로 질환을 확정하거나 치료 방법을 결정하지 "
+                "않으며, 최종 결과와 향후 진료 계획은 담당 의료진과 "
+                "상담해 주세요."
             ),
-        ]
-    )
+            styles["notice"],
+        ),
+    ]
 
     try:
         document.build(story)
